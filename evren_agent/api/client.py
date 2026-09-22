@@ -84,7 +84,7 @@ class EvrenAPI:
         headers = {"User-Agent": "EvrenCLI/0.2.0"}
         if path.startswith("/v1/"):
             if not self.api_key:
-                raise ValueError("EVREN_API_KEY eksik. LLM Çıkarım anahtarınızı ortam değişkenine veya .env dosyasına ekleyin.")
+                raise ValueError("EVREN_API_KEY eksik. Terminalde `evren login` çalıştırın veya EVREN_API_KEY ortam değişkenini ayarlayın.")
             headers["X-API-Key"] = self.api_key
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key

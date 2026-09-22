@@ -2,7 +2,7 @@
 
 help:
 	@echo "EVREN CLI & Agent — Make Commands:"
-	@echo "  make install   - Run installer (sets up .venv, deps, and .env)"
+	@echo "  make install   - Run installer (sets up .venv, deps, and commands)"
 	@echo "  make test      - Run full pytest test suite"
 	@echo "  make run       - Launch interactive evren-agent REPL"
 	@echo "  make commands  - List all available slash commands"

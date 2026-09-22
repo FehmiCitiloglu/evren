@@ -53,7 +53,6 @@ python install.py    # Tüm Sistemler (Evrensel Python)
 uv venv .venv
 source .venv/bin/activate       # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 uv pip install -e .
-cp .env.example .env            # Windows PowerShell: Copy-Item .env.example .env
 ```
 </details>
 
@@ -61,24 +60,25 @@ cp .env.example .env            # Windows PowerShell: Copy-Item .env.example .en
 
 ## ⚙️ Configuration
 
-Copy `.env.example` to `.env`:
+Run `evren-agent` after installation. When the selected provider has no key, it
+prompts with hidden input and stores the key in the OS credential store. Future
+launches read it automatically, from any working directory. Switching to a
+provider without a key using `/provider` also prompts before switching.
+
+To save or replace a key explicitly:
 
 ```bash
-cp .env.example .env
+evren login
+evren login --provider llmtr
+evren login --provider openai
 ```
 
-Edit `.env` with your API keys:
-
-```ini
-# Direct EVREN endpoint
-EVREN_API_KEY=evren_llm_your_key_here
-
-# Or LLMTR Gateway endpoint (https://llmtr.com/v1)
-LLMTR_API_KEY=llmtr-your_key_here
-
-# Optional: Other providers
-OPENAI_API_KEY=sk-...
-```
+Existing environment variables and optional legacy `.env` files remain supported
+and take precedence over stored keys. Remove an old value to use a newly saved
+key. No `.env` file is created by the installer. Without a usable OS credential
+store, automatic onboarding keeps the key only for that run and reports this;
+`evren login` fails if it cannot save. Non-interactive runs require an existing
+stored key or environment variable and never wait for input.
 
 You can customize defaults in `config.yaml`.
 

@@ -145,7 +145,7 @@ def main():
 
     # Step 1: Create venv
     if not venv_dir.exists():
-        log("\n[1/4] Creating virtual environment (.venv)...", "cyan")
+        log("\n[1/3] Creating virtual environment (.venv)...", "cyan")
         if uv_bin:
             log("  Using 'uv venv'...", "dim")
             subprocess.run([uv_bin, "venv", "--python", sys.executable, str(venv_dir)], check=True)
@@ -154,10 +154,10 @@ def main():
             subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
         log("✔ Virtual environment created at .venv", "green")
     else:
-        log("\n[1/4] Existing virtual environment detected (.venv)", "green")
+        log("\n[1/3] Existing virtual environment detected (.venv)", "green")
 
     # Step 2: Install dependencies & package in editable mode
-    log("\n[2/4] Installing dependencies and package...", "cyan")
+    log("\n[2/3] Installing dependencies and package...", "cyan")
     if uv_bin:
         log("  Running 'uv pip install -e .[dev]'...", "dim")
         subprocess.run([uv_bin, "pip", "install", "--python", str(venv_python), "-e", ".[dev]"], check=True)
@@ -168,17 +168,7 @@ def main():
         subprocess.run([str(venv_python), "-m", "pip", "install", "-e", ".[dev]"], check=True)
     log("✔ Package evren-agent and dependencies installed successfully", "green")
 
-    # Step 3: Setup .env file
-    log("\n[3/4] Checking environment configuration (.env)...", "cyan")
-    env_file = root_dir / ".env"
-    env_example = root_dir / ".env.example"
-    if not env_file.exists() and env_example.exists():
-        shutil.copy(env_example, env_file)
-        log("✔ Created .env from .env.example", "green")
-    elif env_file.exists():
-        log("✔ Existing .env preserved (not overwritten)", "green")
-
-    log("\n[4/4] Making EVREN commands available without activation...", "cyan")
+    log("\n[3/3] Making EVREN commands available without activation...", "cyan")
     install_commands(venv_dir, bin_dir, is_windows)
     refresh_commands = configure_path(bin_dir, is_windows)
     log(f"✔ Commands installed in {bin_dir}", "green")
@@ -194,8 +184,9 @@ def main():
     for command in refresh_commands:
         log(f"     {command}", "bold")
 
-    log("\n  2. Configure your EVREN API Key in .env:", "yellow")
-    log("     EVREN_API_KEY=evren_llm_your_key_here", "dim")
+    log("\n  2. Run evren or evren-agent. First launch asks for your API key.", "yellow")
+    log("     The key is stored in your OS credential store; no .env needed.", "dim")
+    log("     evren login            (Save or replace your API key)", "bold")
 
     log("\n  3. Test & Run:", "yellow")
     log("     evren --help           (Direct EVREN API CLI)", "bold")

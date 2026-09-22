@@ -10,7 +10,7 @@ EVREN portalında **Platform**, **LLM Çıkarım** ve **Model Çıkarımı** far
 
 Python 3.10+:
 
-### ⚡ Tek Komutla Hızlı Kurulum (Otomatik .venv, paketler ve .env)
+### ⚡ Tek Komutla Hızlı Kurulum (Otomatik .venv ve paketler)
 
 İşletim sisteminize göre tek bir komut çalıştırmanız yeterlidir:
 
@@ -27,7 +27,7 @@ make install
 python install.py
 ```
 
-Kurulum betiği `uv` (varsa) veya Python'un yerleşik `venv` + `pip` modülünü kullanarak sanal ortamı kurar, bağımlılıkları yükler ve `.env` şablonunu hazırlar.
+Kurulum betiği `uv` (varsa) veya Python'un yerleşik `venv` + `pip` modülünü kullanarak sanal ortamı kurar ve bağımlılıkları yükler. `.env` oluşturmaz; mevcut dosyanıza dokunmaz.
 
 **Venv'i aktive etmeniz gerekmez.** Kurulum, `evren` ve `evren-agent` komutlarını macOS/Linux'ta `~/.local/bin`, Windows'ta `%LOCALAPPDATA%\EVREN\bin` üzerinden erişilebilir yapar ve kullanıcı PATH ayarını kaydeder. macOS/Linux'ta kullanılan kabuğun zsh, bash veya fish başlangıç dosyası güncellenir. Diğer kabuklarda `~/.profile` güncellenir; kabuğunuz bu dosyayı okumuyorsa PATH'i kendi başlangıç dosyanıza ekleyin.
 
@@ -43,27 +43,33 @@ Kurulum betiği `uv` (varsa) veya Python'un yerleşik `venv` + `pip` modülünü
 uv venv .venv
 source .venv/bin/activate
 uv pip install -e '.[dev]'
-cp .env.example .env
 
 # Windows (PowerShell):
 uv venv .venv
 .\.venv\Scripts\Activate.ps1
 uv pip install -e '.[dev]'
-Copy-Item .env.example .env
 
 # Windows (Command Prompt - CMD):
 uv venv .venv
 .venv\Scripts\activate.bat
 uv pip install -e '.[dev]'
-copy .env.example .env
 ```
 </details>
 
-Mevcut `.env` dosyanız varsa üzerine kopyalamayın. Dosyaya portalda e-Devlet ile giriş yaptıktan sonra aldığınız **LLM Çıkarım** anahtarını ekleyin:
+Kurulumdan sonra `evren`, `evren-agent` veya anahtar gerektiren ilk komutu çalıştırın. Anahtar bulunamazsa terminalde **LLM Çıkarım** API anahtarınız gizli girişle sorulur. Anahtar proje dosyalarına yazılmaz; [keyring](https://keyring.readthedocs.io/en/latest/) aracılığıyla macOS Keychain, Windows Credential Locker veya Linux Secret Service/KWallet kasasında saklanır. Sonraki açılışlarda, farklı bir klasörden çalıştırsanız da otomatik okunur.
 
-```dotenv
-EVREN_API_KEY=evren_llm_your_key_here
+```bash
+evren                              # İlk kurulum, ardından komut yardımı
+evren login                        # Kaydedilmiş EVREN anahtarını değiştir
+evren login --provider llmtr        # İsteğe bağlı diğer sağlayıcı
+evren login --provider openai
 ```
+
+Anahtarlar sağlayıcı, API adresi ve `api_key_env` adına göre ayrı saklanır. Özel bir adres için `evren login --base-url https://sunucunuz/v1` veya `--config DOSYA` kullanın. `login` anahtarı kaydeder; geçerliliğini API'de sorgulamaz. `evren models` ile bağlantıyı kontrol edebilirsiniz.
+
+Mevcut ortam değişkenleri ve `.env` dosyaları geriye dönük uyumluluk için desteklenir ve kasadaki anahtardan önce gelir. Yeni kaydı kullanmak için eski ortam/`.env` değerini kaldırın. Şablon anahtarlar gerçek anahtar sayılmaz. `--help`, `--commands`, `api-docs`, `health` ve MCP yönetimi anahtar istemez. Terminal dışı çalıştırmalarda (pipe/CI) giriş beklenmez; kayıtlı anahtar veya ortam değişkeni yoksa açıklayıcı hata döner.
+
+İşletim sistemi kasası kullanılamıyorsa otomatik kurulumda girilen anahtar yalnızca o çalıştırma boyunca bellekte tutulur ve bu durum bildirilir. `evren login` kalıcı kaydı tamamlayamazsa hata verir. Linux'ta etkin Secret Service/KWallet gerekir; dosyaya düz metin kaydetme alternatifi kullanılmaz.
 
 Kimlik doğrulama ve anahtar oluşturma [EVREN portalında](https://evren.ssyz.org.tr/api-keys) yapılır. CLI e-Devlet şifresi istemez. Anahtar komut satırı argümanı olarak alınmaz.
 

@@ -14,6 +14,7 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from evren_agent.core.agent import Agent
+from evren_agent.credentials import ensure_api_key
 
 try:
     from prompt_toolkit import PromptSession
@@ -590,6 +591,9 @@ async def handle_slash_command(agent: Agent, cmd: str) -> bool:
         else:
             target = parts[1]
             try:
+                candidate = agent.providers.get(target)
+                if candidate is not None:
+                    ensure_provider_key(agent, candidate)
                 prov = agent.providers.set_active(target)
                 console.print(f"[green]Switched provider to [bold]{prov.name}[/bold] (model: {prov.current_model})[/green]")
             except Exception as e:
@@ -840,6 +844,12 @@ async def handle_slash_command(agent: Agent, cmd: str) -> bool:
     return True
 
 
+def ensure_provider_key(agent: Agent, provider) -> None:
+    if not provider.api_key:
+        config = agent.config.get("providers", {}).get(provider.name, {})
+        provider.api_key = ensure_api_key(provider.name, config, base_url=provider.base_url)
+
+
 async def run_repl(agent: Agent) -> None:
     await agent.initialize()
     print_banner(agent)
@@ -946,6 +956,12 @@ def main():
         agent.providers.set_active(args.provider)
     if args.model:
         agent.providers.get_active().set_model(args.model)
+
+    try:
+        ensure_provider_key(agent, agent.providers.get_active())
+    except (ValueError, RuntimeError) as exc:
+        print(f"Hata: {exc}", file=sys.stderr)
+        raise SystemExit(1)
 
     if args.prompt:
         # Single-shot execution

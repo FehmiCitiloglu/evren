@@ -115,7 +115,12 @@ def test_uv_explicitly_targets_project_venv(tmp_path, monkeypatch):
     monkeypatch.setattr(installer, "install_commands", lambda *args: None)
     monkeypatch.setattr(installer, "configure_path", lambda *args: [])
     monkeypatch.setenv("VIRTUAL_ENV", "/unrelated/environment")
+    (tmp_path / ".env.example").write_text("EVREN_API_KEY=placeholder\n")
     installer.main()
+    assert not (tmp_path / ".env").exists()
     python = tmp_path / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     assert calls[0] == ["/tools/uv", "venv", "--python", sys.executable, str(tmp_path / ".venv")]
     assert calls[1] == ["/tools/uv", "pip", "install", "--python", str(python), "-e", ".[dev]"]
+    (tmp_path / ".env").write_text("existing configuration\n")
+    installer.main()
+    assert (tmp_path / ".env").read_text() == "existing configuration\n"

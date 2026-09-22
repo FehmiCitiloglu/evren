@@ -15,6 +15,7 @@ import httpx
 import yaml
 
 from evren_agent.config import load_config
+from evren_agent.credentials import DEFAULTS, ensure_api_key
 from .client import DEFAULT_BASE_URL, EvrenAPI, api_schema, media_data_url
 
 
@@ -67,13 +68,15 @@ def common_options(parser: argparse.ArgumentParser) -> None:
 def build_parser(prog: str = "evren") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=prog, description="EVREN API terminal istemcisi — agent başlatmadan doğrudan işlemler")
     common_options(parser)
-    commands = parser.add_subparsers(dest="command", required=True)
+    commands = parser.add_subparsers(dest="command")
 
     def command(name: str, help: str, parent=commands):
         item = parent.add_parser(name, help=help, description=help)
         common_options(item)
         return item
 
+    login = command("login", "API anahtarını gizli girişle kaydet veya yenile")
+    login.add_argument("--provider", choices=list(DEFAULTS), default="evren")
     command("models", "Anahtarın erişebildiği modeller, modaliteler ve fiyatlar")
     command("quota", "Token kotası, yenilenme zamanı, kalan ve rezerve kredi")
     health = command("health", "Servis canlılık/hazırlık kontrolü (anahtar gerekmez)")
@@ -338,11 +341,26 @@ async def run(argv: Sequence[str], *, api_key: str | None = None, base_url: str 
         settings = load_config(config_path)
         if not isinstance(settings, dict) or not isinstance(settings.get("providers", {}), dict):
             raise ValueError("Config ve providers alanı YAML nesnesi olmalıdır.")
-        config = settings.get("providers", {}).get("evren", {})
+        provider = getattr(args, "provider", "evren")
+        config = settings.get("providers", {}).get(provider, {})
         if not isinstance(config, dict):
-            raise ValueError("providers.evren bir YAML nesnesi olmalıdır.")
-        key = api_key if api_key is not None else os.environ.get(config.get("api_key_env", "EVREN_API_KEY"), "")
-        url = getattr(args, "base_url", None) or base_url or os.environ.get("EVREN_BASE_URL") or config.get("base_url", DEFAULT_BASE_URL)
+            raise ValueError(f"providers.{provider} bir YAML nesnesi olmalıdır.")
+        url = (getattr(args, "base_url", None) or base_url
+               or (os.environ.get("EVREN_BASE_URL") if provider == "evren" else None)
+               or config.get("base_url", DEFAULTS[provider][1]))
+        if args.command == "login":
+            ensure_api_key(provider, config, base_url=url, replace=True)
+            return 0
+        if args.command is None:
+            if sys.stdin.isatty():
+                ensure_api_key(provider, config, base_url=url)
+            build_parser().print_help()
+            return 0
+        needs_key = args.command not in ("health", "api-docs")
+        if args.command == "request" and args.path in ("/healthz", "/readyz"):
+            needs_key = False
+        if needs_key:
+            key = api_key if api_key is not None else ensure_api_key(provider, config, base_url=url)
         model = default_model or config.get("default_model", "glm-5.3")
         async with EvrenAPI(key, url, getattr(args, "timeout", 180), transport=transport) as client:
             filename = getattr(args, "output", None)

@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 from evren_agent.providers.base import BaseProvider
 from evren_agent.providers.evren import EvrenProvider
 from evren_agent.providers.openai_provider import OpenAIProvider
+from evren_agent.credentials import get_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +53,7 @@ class ProviderRegistry:
 
         # 1. EVREN Direct Provider
         evren_conf = providers_conf.get("evren", {})
-        import os
-        evren_key = os.environ.get(evren_conf.get("api_key_env", "EVREN_API_KEY"), "")
+        evren_key = get_api_key("evren", evren_conf)
         evren_prov = EvrenProvider(
             api_key=evren_key,
             base_url=evren_conf.get("base_url", "https://evren-llmapi.ssyz.org.tr/v1"),
@@ -65,7 +65,7 @@ class ProviderRegistry:
 
         # 2. LLMTR Gateway Provider (for EVREN models via LLMTR)
         llmtr_conf = providers_conf.get("llmtr", {})
-        llmtr_key = os.environ.get(llmtr_conf.get("api_key_env", "LLMTR_API_KEY"), "")
+        llmtr_key = get_api_key("llmtr", llmtr_conf)
         llmtr_prov = EvrenProvider(
             api_key=llmtr_key,
             base_url=llmtr_conf.get("base_url", "https://llmtr.com/v1"),
@@ -77,7 +77,7 @@ class ProviderRegistry:
 
         # 3. OpenAI Provider
         openai_conf = providers_conf.get("openai", {})
-        openai_key = os.environ.get(openai_conf.get("api_key_env", "OPENAI_API_KEY"), "")
+        openai_key = get_api_key("openai", openai_conf)
         openai_prov = OpenAIProvider(
             api_key=openai_key,
             base_url=openai_conf.get("base_url", "https://api.openai.com/v1"),
