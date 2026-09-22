@@ -115,9 +115,9 @@ evren-agent --provider llmtr --model evren/glm-5.3-fp8
 | `/status` | Diagnostics | Display full agent diagnostics (provider, model, tools, skills, message count) |
 | `/provider [name]` | Providers | Switch or list providers (`/provider evren`, `/provider llmtr`, `/provider openai`) |
 | `/model [name]` | Models | Switch active model (`/model glm-5.3`, `/model evren/glm-5.3-fp8`) or list models |
-| `/mcp list` | MCP | Show connected MCP servers and their exposed tools |
-| `/mcp add <name> <cmd> [args]` | MCP | Connect a stdio MCP server on the fly (`/mcp add telemetry python3 examples/mock_mcp_server.py`) |
-| `/mcp remove <name>` | MCP | Disconnect an MCP server and unmount its tools |
+| `/mcp list` | MCP | Show connected MCP servers and their exposed tools (`/mcp list` or `/mcp ls`) |
+| `/mcp add <name> <cmd> [args]` | MCP | Connect and persist a new MCP server (`/mcp add git npx -y @modelcontextprotocol/server-git`) |
+| `/mcp remove <name>` | MCP | Disconnect and remove an MCP server from configuration (`/mcp remove git` or `/mcp rm git`) |
 | `/skill list` | Skills | View available skills and their active status |
 | `/skill on <name>` / `/skill off` | Skills | Toggle skill prompt augmentation (`/skill on computer-use`, `/skill on code_assistant`) |
 | `/skill info <name>` | Skills | Inspect full prompt instructions and tags of a skill |
@@ -133,6 +133,60 @@ evren-agent --provider llmtr --model evren/glm-5.3-fp8
 | `/export [file.md]` | Session | Export conversation transcript with reasoning to Markdown |
 | `/clear` | Session | Clear chat history and reset context window |
 | `/exit`, `/quit` | Session | Safely disconnect MCP servers and exit the session |
+
+---
+
+## 🔌 Model Context Protocol (MCP) CLI (Codex & Claude Benzeri)
+
+EVREN Agent, Claude Code ve Codex CLI benzeri pratik bir `mcp` komut satırı arayüzü sunar. Eklenen sunucular doğrudan `config.yaml` dosyasına kaydedilir ve sonraki agent oturumlarında otomatik olarak ayağa kalkar.
+
+### 1. Terminalden MCP Sunucusu Ekleme (`mcp add`)
+
+```bash
+# Standart stdio MCP sunucusu ekleme (npx, uvx, python vb.):
+evren-agent mcp add git npx -y @modelcontextprotocol/server-git
+evren-agent mcp add fs npx -y @modelcontextprotocol/server-filesystem /Users/me/Documents
+evren-agent mcp add sqlite uvx mcp-server-sqlite --db-path ./app.db
+
+# Ortam değişkeni (Environment variable) ile ekleme:
+evren-agent mcp add github -e GITHUB_PERSONAL_ACCESS_TOKEN=ghp_xxx npx -y @modelcontextprotocol/server-github
+
+# Uzak HTTP/SSE MCP sunucusu ekleme:
+evren-agent mcp add remote --url http://localhost:8000/sse
+
+# Bağlantı testini atlayarak doğrudan kaydetme:
+evren-agent mcp add my-server python /path/to/server.py --no-test
+
+# Aynı komutlar 'evren mcp add ...' olarak da çalışır:
+evren mcp add git npx -y @modelcontextprotocol/server-git
+```
+
+`mcp add` komutu varsayılan olarak sunucuya bağlanır, araçları (tools) listeler, testi başarılı olursa `config.yaml` dosyasına yazar.
+
+### 2. Yapılandırılmış Sunucuları Listeleme (`mcp list`)
+
+```bash
+evren-agent mcp list
+# veya canlı bağlantı ve araç durumunu kontrol ederek:
+evren-agent mcp list --test
+```
+
+### 3. MCP Sunucusunu Kaldırma (`mcp remove` / `mcp rm`)
+
+```bash
+evren-agent mcp remove git
+# veya kısa takma ad:
+evren-agent mcp rm git
+```
+
+### 4. REPL İçinde Dinamik Ekleyip Çıkarma
+
+İnteraktif REPL oturumunda da aynı komutlar geçerlidir ve `config.yaml` otomatik güncellenir:
+```
+You > /mcp add git npx -y @modelcontextprotocol/server-git
+You > /mcp list
+You > /mcp rm git
+```
 
 ---
 

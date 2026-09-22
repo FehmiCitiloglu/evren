@@ -225,7 +225,26 @@ asyncio.run(main())
 
 İstemci `chat`, `completions`, `responses`, `embeddings`, `rerank`, `ocr`, `transcribe`, `upload_media`, medya yaşam döngüsü, şartlar ve durum sorguları için metotlar sunar. Akış için `stream` kullanın; nesneyi `async with` ile veya `await api.close()` çağrısıyla kapatın.
 
-## Agent modu ve testler
+## Agent ve MCP modu
+
+Claude Code ve Codex CLI benzeri MCP sunucusu ekleme, listeleme ve kaldırma:
+
+```bash
+# MCP sunucusu ekleme ve config.yaml'a otomatik kaydetme:
+evren-agent mcp add git npx -y @modelcontextprotocol/server-git
+evren-agent mcp add sqlite uvx mcp-server-sqlite --db-path ./app.db
+evren-agent mcp add github -e GITHUB_PERSONAL_ACCESS_TOKEN=ghp_xxx npx -y @modelcontextprotocol/server-github
+evren-agent mcp add remote --url http://localhost:8000/sse
+
+# Sunucuları listeleme ve kaldırma:
+evren-agent mcp list
+evren-agent mcp list --test
+evren-agent mcp remove git    # veya: evren-agent mcp rm git
+
+# (Aynı komutlar 'evren mcp add ...' olarak da çalışır)
+```
+
+İnteraktif agent ve testler:
 
 ```bash
 evren-agent
@@ -234,4 +253,4 @@ evren-agent --provider llmtr --model evren/glm-5.3-fp8
 pytest -q
 ```
 
-[MCP, skill, plugin ve agent kullanım kılavuzu](docs/AGENT.md). Agent REPL'inde `/api ...` için doğrudan `evren` sağlayıcısını seçin. Birim/kontrat testleri sahte HTTP transport kullanır; gerçek anahtara veya ücretli API çağrılarına ihtiyaç duymaz.
+[Detaylı MCP, skill, plugin ve agent kullanım kılavuzu](docs/AGENT.md). Agent REPL'inde `/api ...` için doğrudan `evren` sağlayıcısını seçin. Birim/kontrat testleri sahte HTTP transport kullanır; gerçek anahtara veya ücretli API çağrılarına ihtiyaç duymaz.
