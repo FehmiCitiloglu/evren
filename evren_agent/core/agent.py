@@ -44,6 +44,7 @@ class Agent:
         config: Optional[Dict[str, Any]] = None,
         config_path: Optional[str] = None,
     ):
+        self.config_path = config_path
         self.config = config or load_config(config_path)
         agent_conf = self.config.get("agent", {})
         self.name: str = agent_conf.get("name", "EvrenAgent")

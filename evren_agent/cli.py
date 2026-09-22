@@ -74,13 +74,13 @@ COMMANDS_CATALOG: List[Dict[str, str]] = [
         "command": "/mcp add",
         "category": "MCP",
         "syntax": "/mcp add <name> <cmd> [args...]",
-        "description": "Connect a new stdio/HTTP MCP server dynamically",
+        "description": "Connect & persist a new stdio/HTTP MCP server to config",
     },
     {
         "command": "/mcp remove",
         "category": "MCP",
-        "syntax": "/mcp remove <name>",
-        "description": "Disconnect an MCP server and unmount its tools",
+        "syntax": "/mcp remove <name> (or /mcp rm <name>)",
+        "description": "Disconnect & remove an MCP server from configuration",
     },
     {
         "command": "/skill list",
@@ -275,10 +275,15 @@ class AgentCompleter(Completer if HAVE_PROMPT_TOOLKIT else object):  # type: ign
         elif root == "/mcp":
             if len(parts) == 2:
                 prefix = parts[1].lower()
-                for sc, desc in [("list", "List servers"), ("add", "Connect server"), ("remove", "Disconnect server")]:
+                for sc, desc in [
+                    ("list", "List connected & configured servers"),
+                    ("add", "Connect and save server"),
+                    ("remove", "Disconnect & remove server"),
+                    ("rm", "Alias for remove"),
+                ]:
                     if sc.startswith(prefix):
                         yield Completion(sc, start_position=-len(parts[1]), display_meta=desc)
-            elif len(parts) == 3 and sub == "remove":
+            elif len(parts) == 3 and sub in ("remove", "rm"):
                 prefix = parts[2].lower()
                 try:
                     for s in self.agent.mcp.list_servers():
@@ -375,7 +380,7 @@ def setup_readline_completer(agent: Agent):
                 elif root == "/skill":
                     candidates = [sc for sc in ["list", "on", "off", "info", "add"] if sc.startswith(prefix)]
                 elif root == "/mcp":
-                    candidates = [sc for sc in ["list", "add", "remove"] if sc.startswith(prefix)]
+                    candidates = [sc for sc in ["list", "add", "remove", "rm"] if sc.startswith(prefix)]
                 elif root == "/plugin":
                     candidates = [sc for sc in ["list", "add"] if sc.startswith(prefix)]
                 elif root == "/terms":
@@ -608,10 +613,21 @@ async def handle_slash_command(agent: Agent, cmd: str) -> bool:
 
     elif root == "/mcp":
         sub = parts[1] if len(parts) > 1 else "list"
-        if sub == "list":
+        if sub in ("list", "ls"):
             servers = agent.mcp.list_servers()
             if not servers:
-                console.print("[yellow]No MCP servers currently connected. Connect with: /mcp add <name> <cmd> [args...][/yellow]")
+                from evren_agent.config import get_mcp_servers_from_config
+                cfg_servers = get_mcp_servers_from_config(getattr(agent, "config_path", None))
+                if not cfg_servers:
+                    console.print("[yellow]No MCP servers connected or configured. Connect with: /mcp add <name> <cmd> [args...][/yellow]")
+                else:
+                    table = Table(title="Configured MCP Servers (Not Active in Session)")
+                    table.add_column("Name", style="bold cyan")
+                    table.add_column("Command / URL")
+                    for name, sc in cfg_servers.items():
+                        target = sc.get("command") or sc.get("url") or "-"
+                        table.add_row(name, str(target))
+                    console.print(table)
             else:
                 table = Table(title="Connected MCP Servers")
                 table.add_column("Name", style="bold cyan")
@@ -628,29 +644,71 @@ async def handle_slash_command(agent: Agent, cmd: str) -> bool:
                 console.print(table)
 
         elif sub == "add":
-            if len(parts) < 4:
-                console.print("[yellow]Usage: /mcp add <name> <command> [args...][/yellow]")
-            else:
-                s_name = parts[2]
-                s_cmd = parts[3]
-                s_args = parts[4:]
-                with console.status(f"[cyan]Connecting MCP server '{s_name}'...[/cyan]"):
-                    try:
-                        tools = await agent.mcp.add_server(name=s_name, command=s_cmd, args=s_args)
-                        console.print(f"[green]Connected MCP server '{s_name}'. Registered tools: {', '.join(tools)}[/green]")
-                    except Exception as e:
-                        console.print(f"[red]Failed connecting to MCP server: {e}[/red]")
+            raw_tokens = shlex.split(cmd)[2:]
+            p = argparse.ArgumentParser(prog="/mcp add", add_help=False)
+            p.add_argument("--url", type=str, default=None)
+            p.add_argument("-e", "--env", action="append", default=[])
+            parsed, extra = p.parse_known_args(raw_tokens)
+            extra = [t for t in extra if t != "--"]
 
-        elif sub == "remove":
+            if not extra:
+                console.print("[yellow]Usage: /mcp add <name> <command> [args...] or /mcp add <name> --url <url>[/yellow]")
+            else:
+                s_name = extra[0]
+                s_cmd = extra[1] if len(extra) > 1 else None
+                s_args = extra[2:] if len(extra) > 2 else []
+
+                if not s_cmd and not parsed.url:
+                    console.print("[yellow]Error: Must specify command or --url. Usage: /mcp add <name> <command> [args...][/yellow]")
+                else:
+                    env_dict: Dict[str, str] = {}
+                    for item in parsed.env:
+                        if "=" in item:
+                            k, v = item.split("=", 1)
+                            env_dict[k.strip()] = v.strip()
+                        else:
+                            k = item.strip()
+                            env_dict[k] = os.environ.get(k, "")
+
+                    with console.status(f"[cyan]Connecting MCP server '{s_name}'...[/cyan]"):
+                        try:
+                            tools = await agent.mcp.add_server(
+                                name=s_name,
+                                command=s_cmd,
+                                args=s_args,
+                                env=env_dict,
+                                url=parsed.url,
+                            )
+                            from evren_agent.config import add_mcp_server_to_config
+                            server_conf: Dict[str, Any] = {}
+                            if s_cmd:
+                                server_conf["command"] = s_cmd
+                            if s_args:
+                                server_conf["args"] = s_args
+                            if env_dict:
+                                server_conf["env"] = env_dict
+                            if parsed.url:
+                                server_conf["url"] = parsed.url
+
+                            cfg_p = add_mcp_server_to_config(s_name, server_conf, getattr(agent, "config_path", None))
+                            tools_preview = f"Registered {len(tools)} tools: {', '.join(tools)}" if tools else "Connected (no tools)"
+                            console.print(f"[bold green]✓ Connected MCP server '[cyan]{s_name}[/cyan]' and saved to {cfg_p}.[/bold green]")
+                            console.print(f"[dim]{tools_preview}[/dim]")
+                        except Exception as e:
+                            console.print(f"[bold red]Failed connecting to MCP server:[/bold red] {e}")
+
+        elif sub in ("remove", "rm", "delete"):
             if len(parts) < 3:
-                console.print("[yellow]Usage: /mcp remove <name>[/yellow]")
+                console.print("[yellow]Usage: /mcp remove <name> (or /mcp rm <name>)[/yellow]")
             else:
                 s_name = parts[2]
                 ok = await agent.mcp.remove_server(s_name)
-                if ok:
-                    console.print(f"[green]Removed MCP server '{s_name}'.[/green]")
+                from evren_agent.config import remove_mcp_server_from_config
+                cfg_ok = remove_mcp_server_from_config(s_name, getattr(agent, "config_path", None))
+                if ok or cfg_ok:
+                    console.print(f"[bold green]✓ Removed MCP server '[cyan]{s_name}[/cyan]' and updated configuration.[/bold green]")
                 else:
-                    console.print(f"[red]MCP server '{s_name}' not found.[/red]")
+                    console.print(f"[bold red]MCP server '{s_name}' not found.[/bold red]")
 
     elif root == "/skill":
         sub = parts[1] if len(parts) > 1 else "list"
@@ -857,7 +915,13 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "api":
         from evren_agent.api.cli import main as api_main
         raise SystemExit(api_main(sys.argv[2:]))
-    parser = argparse.ArgumentParser(description="EVREN Agent CLI", epilog="Direct API commands: evren-agent api --help (or evren --help)")
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+        from evren_agent.mcp.cli import main as mcp_main
+        raise SystemExit(mcp_main(sys.argv[2:]))
+    parser = argparse.ArgumentParser(
+        description="EVREN Agent CLI",
+        epilog="MCP commands: evren-agent mcp --help | Direct API: evren-agent api --help",
+    )
     parser.add_argument("--prompt", "-p", type=str, help="Single-shot prompt to execute")
     parser.add_argument("--provider", type=str, help="Provider name (evren, llmtr, openai)")
     parser.add_argument("--model", "-m", type=str, help="Model ID")

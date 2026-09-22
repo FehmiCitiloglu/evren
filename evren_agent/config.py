@@ -51,3 +51,46 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         },
         "plugins": {"directory": "plugins", "autoload_builtins": True},
     }
+
+
+def save_config(config_data: Dict[str, Any], config_path: Optional[str] = None) -> Path:
+    """Save configuration dictionary back to YAML file."""
+    default_path = Path("config.yaml")
+    target_path = Path(config_path) if config_path else default_path
+    with open(target_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(config_data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    return target_path
+
+
+def get_mcp_servers_from_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """Retrieve mcp_servers dictionary from config.yaml."""
+    cfg = load_config(config_path)
+    servers = cfg.get("mcp_servers", {})
+    return servers if isinstance(servers, dict) else {}
+
+
+def add_mcp_server_to_config(
+    name: str,
+    server_config: Dict[str, Any],
+    config_path: Optional[str] = None,
+) -> Path:
+    """Add or update an MCP server configuration in config.yaml."""
+    cfg = load_config(config_path)
+    if "mcp_servers" not in cfg or not isinstance(cfg["mcp_servers"], dict):
+        cfg["mcp_servers"] = {}
+    cfg["mcp_servers"][name] = server_config
+    return save_config(cfg, config_path)
+
+
+def remove_mcp_server_from_config(
+    name: str,
+    config_path: Optional[str] = None,
+) -> bool:
+    """Remove an MCP server from config.yaml. Returns True if removed, False if not found."""
+    cfg = load_config(config_path)
+    servers = cfg.get("mcp_servers", {})
+    if isinstance(servers, dict) and name in servers:
+        del servers[name]
+        save_config(cfg, config_path)
+        return True
+    return False

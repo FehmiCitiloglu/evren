@@ -325,6 +325,9 @@ async def execute(args: argparse.Namespace, client: EvrenAPI, default_model: str
 
 async def run(argv: Sequence[str], *, api_key: str | None = None, base_url: str | None = None,
               default_model: str | None = None, transport: httpx.AsyncBaseTransport | None = None) -> int:
+    if argv and argv[0] == "mcp":
+        from evren_agent.mcp.cli import run_mcp
+        return await run_mcp(argv[1:])
     args = build_parser().parse_args(argv)
     key = api_key or ""
     client = None
@@ -358,8 +361,12 @@ async def run(argv: Sequence[str], *, api_key: str | None = None, base_url: str 
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    args_list = sys.argv[1:] if argv is None else list(argv)
+    if args_list and args_list[0] == "mcp":
+        from evren_agent.mcp.cli import main as mcp_main
+        return mcp_main(args_list[1:])
     try:
-        return asyncio.run(run(sys.argv[1:] if argv is None else argv))
+        return asyncio.run(run(args_list))
     except KeyboardInterrupt:
         return 130
     except BrokenPipeError:

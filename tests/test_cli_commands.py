@@ -75,6 +75,7 @@ async def test_agent_completer():
     assert "list" in c_mcp_sub
     assert "add" in c_mcp_sub
     assert "remove" in c_mcp_sub
+    assert "rm" in c_mcp_sub
 
     # 6. Provider completions
     doc_prov = Document("/provider ")
