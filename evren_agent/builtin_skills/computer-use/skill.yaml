@@ -1,0 +1,4 @@
+name: computer-use
+description: Operating system interaction, terminal command execution, filesystem navigation, and safe automation
+version: 1.0.0
+tags: [computer-use, computer_use, terminal, shell, cli, filesystem, automation]

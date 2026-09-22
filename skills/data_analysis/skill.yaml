@@ -1,0 +1,4 @@
+name: data_analysis
+description: Specialized instructions for exploratory data analysis, statistics, and pandas processing
+version: 1.0.0
+tags: [data, statistics, pandas, python]
