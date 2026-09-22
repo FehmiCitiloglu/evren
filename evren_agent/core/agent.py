@@ -2,20 +2,20 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
+from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
 from pathlib import Path
-import shutil
-import subprocess
-import sys
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple, Union
 
 from evren_agent.config import load_config
+from evren_agent.core.shell import run_shell
 from evren_agent.core.tools import ToolRegistry
 from evren_agent.core.types import (
     Message,
     ModelInfo,
     StreamChunk,
     ToolCall,
+    ToolCallFunction,
     ToolDefinition,
     ToolResult,
 )
@@ -282,14 +282,16 @@ class Agent:
                         "command": {"type": "string", "description": "The command string to execute"},
                         "shell": {
                             "type": "string",
-                            "description": "Optional shell interpreter: 'powershell', 'pwsh', 'cmd', or 'bash'. Defaults to system default shell.",
+                            "description": "Optional shell interpreter, e.g. bash, zsh, powershell, pwsh, cmd. Defaults to the system shell.",
                         },
+                        "cwd": {"type": "string", "description": "Working directory for this command only"},
+                        "timeout": {"type": "number", "exclusiveMinimum": 0, "description": "Timeout in seconds (default 60)"},
                     },
                     "required": ["command"],
                 },
                 source="meta:agent",
             ),
-            self.run_command,
+            self.run_command_async,
         )
 
         # Tool 11: file operations
@@ -390,50 +392,42 @@ class Agent:
             prov.set_model(model_name)
         return f"Switched to provider '{prov.name}' with model '{prov.current_model}'."
 
-    def run_command(self, command: str, shell: Optional[str] = None) -> str:
-        try:
-            is_windows = sys.platform == "win32"
-            selected_shell = (shell or "").lower().strip()
+    def run_command(self, command: str, shell: Optional[str] = None,
+                    cwd: Optional[str] = None, timeout: float = 60) -> str:
+        """Synchronous SDK compatibility; async callers should use run_command_async."""
+        def execute():
+            return asyncio.run(self.run_command_async(command, shell, cwd, timeout))
 
-            if selected_shell in ("powershell", "pwsh"):
-                ps_bin = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
-                args = [ps_bin, "-NoProfile", "-NonInteractive", "-Command", command]
-                res = subprocess.run(
-                    args,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=60,
-                )
-            elif selected_shell == "cmd" or (is_windows and not selected_shell):
-                # On Windows default to cmd /c or explicit cmd
-                cmd_bin = os.environ.get("COMSPEC", "cmd.exe") if is_windows else "cmd.exe"
-                res = subprocess.run(
-                    [cmd_bin, "/c", command] if is_windows else command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=60,
-                )
-            else:
-                res = subprocess.run(
-                    command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=60,
-                )
-            out = res.stdout or ""
-            if res.stderr:
-                out += f"\n[stderr]:\n{res.stderr}"
-            return f"Exit code {res.returncode}:\n{out.strip()}"
-        except Exception as e:
-            return f"Command execution error: {e}"
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return execute()
+        # Existing SDK callers may invoke this synchronous method inside a loop.
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(execute).result()
+
+    async def run_command_async(self, command: str, shell: Optional[str] = None,
+                                cwd: Optional[str] = None, timeout: float = 60) -> str:
+        return await run_shell(command, shell=shell, cwd=cwd, timeout=timeout)
+
+    async def run_local_command(self, command: str) -> str:
+        """Execute an explicit user command without a model call, retaining context."""
+        if not command.strip():
+            return "Usage: !<command> (for example: !ls -la)"
+        call = ToolCall(
+            id=f"shell_{uuid4().hex}",
+            function=ToolCallFunction(name="run_command", arguments=json.dumps({"command": command})),
+        )
+        self.messages.append(Message(role="user", content=f"!{command}"))
+        self.messages.append(Message(role="assistant", tool_calls=[call]))
+        try:
+            result = await self.run_command_async(command)
+        except asyncio.CancelledError:
+            self.messages.append(ToolResult(tool_call_id=call.id, name="run_command",
+                                            content="Command interrupted by user.", is_error=True).to_message())
+            raise
+        self.messages.append(ToolResult(tool_call_id=call.id, name="run_command", content=result).to_message())
+        return result
 
     def read_file(self, path: str) -> str:
         p = Path(path)
@@ -471,6 +465,9 @@ class Agent:
         on_tool_end: Optional[Callable[[str, str], None]] = None,
     ) -> str:
         """Run the agent loop until completion or max_iterations reached."""
+        if prompt.lstrip().startswith("!"):
+            return await self.run_local_command(prompt.lstrip()[1:].strip())
+
         if not self._is_initialized:
             await self.initialize()
 

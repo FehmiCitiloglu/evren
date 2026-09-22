@@ -125,6 +125,7 @@ evren-agent --provider llmtr --model evren/glm-5.3-fp8
 | `/plugin list` | Plugins | View loaded plugins, versions, and injected tools |
 | `/plugin add <file.py>` | Plugins | Load a Python plugin dynamically (`/plugin add plugins/weather_plugin.py`) |
 | `/tools` | Tools | List all registered tools, their parameters, and sources (`builtin`, `mcp`, `skill`, `plugin`) |
+| `/shell <command>` / `!<command>` | Terminal | Run a local command directly and keep its output in context (`!ls -la`, `!git status`) |
 | `/api <command>` | EVREN | All direct API commands; `/api --help`, `/api quota`, `/api ocr --file scan.png` |
 | `/terms text` | EVREN | Read the current terms before explicit acceptance |
 | `/terms` | EVREN | Check EVREN direct endpoint terms of service status |
@@ -133,6 +134,39 @@ evren-agent --provider llmtr --model evren/glm-5.3-fp8
 | `/export [file.md]` | Session | Export conversation transcript with reasoning to Markdown |
 | `/clear` | Session | Clear chat history and reset context window |
 | `/exit`, `/quit` | Session | Safely disconnect MCP servers and exit the session |
+
+### Terminal komutları
+
+Agent oturumunda mesajı `!` ile başlatarak komutu doğrudan çalıştırabilirsiniz:
+
+```text
+You > !ls -la
+You > !git status
+You > !cd src && ls -la
+You > /shell pwd
+You > Bu çıktıya göre proje yapısını açıkla.
+```
+
+Komut yürütülürken modele istek gönderilmez. Komut, çıkış kodu, stdout ve stderr
+sohbet geçmişine eklenir; sonraki normal mesajda model bunları görebilir.
+Çıktı Markdown olarak yorumlanmadan terminal panelinde gösterilir.
+
+`Ctrl+C` çalışan komutu durdurur ve oturuma geri döner. Varsayılan zaman aşımı
+60 saniyedir. Her çıktı akışının ilk 32 KiB'ı tutulur; daha uzun çıktılar kesildi
+işaretiyle gösterilir. Komutlar yerel kullanıcı yetkileriyle çalışır; bir sandbox
+oluşturulmaz. İnteraktif programlara stdin verilmez. Her komut yeni bir shell
+açar; `cd` ve `export` sonraki komuta taşınmaz. Dizin seçmek için aynı komutta
+`cd dizin && komut` kullanın.
+
+macOS/Linux'ta `$SHELL` (yoksa `/bin/sh`), Windows'ta `COMSPEC`/CMD kullanılır.
+Modelin `run_command` aracı ayrıca `shell`, `cwd` ve `timeout` parametrelerini
+destekler. Asenkron Python kullanımı: `await agent.run_command_async("ls -la")`.
+
+Tek komutluk kullanım da desteklenir ve API anahtarı gerektirmez:
+
+```bash
+evren-agent -p '!ls -la'
+```
 
 ---
 

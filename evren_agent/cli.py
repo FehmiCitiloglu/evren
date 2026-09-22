@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+import signal
 import sys
 import shlex
 from typing import Any, Dict, List, Optional
@@ -12,6 +13,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
+from rich.text import Text
 
 from evren_agent.core.agent import Agent
 from evren_agent.credentials import ensure_api_key
@@ -29,6 +31,12 @@ except ImportError:
 console = Console()
 
 COMMANDS_CATALOG: List[Dict[str, str]] = [
+    {
+        "command": "/shell",
+        "category": "Terminal",
+        "syntax": "/shell <command> (or !<command>)",
+        "description": "Run a local shell command directly, e.g. !ls -la; retain output in chat context",
+    },
     {
         "command": "/help",
         "category": "Reference",
@@ -409,7 +417,8 @@ def print_banner(agent: Agent) -> None:
 [green]Skills:[/green]   {', '.join(active_skills) or '[dim]none[/dim]'}
 [green]MCPs:[/green]     {mcp_count} servers connected
 [green]Plugins:[/green]  {plugins_count} active
-[dim]Type [bold]/commands[/bold] or [bold]/help[/bold] for commands (Tab for autocomplete), or start chatting below.[/dim]"""
+[dim]Type [bold]/commands[/bold] or [bold]/help[/bold] for commands (Tab for autocomplete), or start chatting below.
+Run local terminal commands with [bold]!ls -la[/bold] or [bold]/shell <command>[/bold].[/dim]"""
 
     console.print(Panel(content, title="🚀 EvrenAgent", border_style="cyan"))
 
@@ -485,6 +494,41 @@ def print_help() -> None:
     d_table.add_row("/exit, /quit", "Safely disconnect all MCP servers and exit the session")
     console.print(d_table)
 
+    console.print(Panel(
+        "!ls -la  ·  !git status  ·  /shell pwd\n"
+        "Runs locally without a model request; output is added to conversation context.\n"
+        "Ctrl+C stops the command. Default timeout: 60 seconds.\n"
+        "Each command starts a new shell in the launch directory; use cd path && command.\n"
+        "Commands run with your local user permissions.",
+        title="Terminal", border_style="yellow",
+    ))
+
+
+async def handle_shell_command(agent: Agent, command: str) -> None:
+    """Run explicit shell input and let Ctrl+C return to the REPL."""
+    task = asyncio.create_task(agent.run_local_command(command))
+    previous_handler = signal.getsignal(signal.SIGINT)
+    interrupted = False
+    loop = asyncio.get_running_loop()
+
+    def interrupt(signum, frame):
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            loop.call_soon_threadsafe(task.cancel)
+
+    signal.signal(signal.SIGINT, interrupt)
+    try:
+        with console.status("[bold yellow]Running command... (Ctrl+C to stop)[/bold yellow]"):
+            result = await task
+        console.print(Panel(Text(result), title="Terminal", border_style="yellow"))
+    except asyncio.CancelledError:
+        if not interrupted:
+            raise
+        console.print("[yellow]Command interrupted.[/yellow]")
+    finally:
+        signal.signal(signal.SIGINT, previous_handler)
+
 
 async def handle_slash_command(agent: Agent, cmd: str) -> bool:
     """Returns True if command was handled, False if user wants to exit."""
@@ -496,6 +540,10 @@ async def handle_slash_command(agent: Agent, cmd: str) -> bool:
 
     if root == "/help":
         print_help()
+
+    elif root == "/shell":
+        command_parts = cmd.strip().split(maxsplit=1)
+        await handle_shell_command(agent, command_parts[1] if len(command_parts) > 1 else "")
 
     elif root in ("/commands", "/list"):
         cat_filter = parts[1] if len(parts) > 1 else None
@@ -880,6 +928,10 @@ async def run_repl(agent: Agent) -> None:
             if not user_input:
                 continue
 
+            if user_input.startswith("!"):
+                await handle_shell_command(agent, user_input[1:].strip())
+                continue
+
             if user_input.startswith("/"):
                 keep_going = await handle_slash_command(agent, user_input)
                 if not keep_going:
@@ -957,19 +1009,25 @@ def main():
     if args.model:
         agent.providers.get_active().set_model(args.model)
 
-    try:
-        ensure_provider_key(agent, agent.providers.get_active())
-    except (ValueError, RuntimeError) as exc:
-        print(f"Hata: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+    local_prompt = args.prompt is not None and args.prompt.lstrip().startswith("!")
+    if not local_prompt:
+        try:
+            ensure_provider_key(agent, agent.providers.get_active())
+        except (ValueError, RuntimeError) as exc:
+            print(f"Hata: {exc}", file=sys.stderr)
+            raise SystemExit(1)
 
     if args.prompt:
         # Single-shot execution
         async def run_single():
-            await agent.initialize()
-            response = await agent.run(args.prompt)
-            print(response)
-            await agent.close()
+            try:
+                if local_prompt:
+                    await handle_shell_command(agent, args.prompt.lstrip()[1:].strip())
+                else:
+                    response = await agent.run(args.prompt)
+                    print(response)
+            finally:
+                await agent.close()
 
         asyncio.run(run_single())
     else:

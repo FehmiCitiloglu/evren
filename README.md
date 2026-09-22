@@ -265,4 +265,10 @@ evren-agent --provider llmtr --model evren/glm-5.3-fp8
 pytest -q
 ```
 
+Agent içinde `!ls -la`, `!git status` veya `/shell pwd` ile yerel terminal komutu
+çalıştırabilirsiniz. Komut doğrudan çalışır, çıktısı sohbet bağlamına eklenir.
+`Ctrl+C` komutu durdurup oturuma döner; varsayılan zaman aşımı 60 saniyedir.
+Tek komut için `evren-agent -p '!ls -la'` kullanın; API anahtarı gerekmez.
+Her komut yeni bir shell açar; dizin değiştirmek için `!cd dizin && komut` yazın.
+
 [Detaylı MCP, skill, plugin ve agent kullanım kılavuzu](docs/AGENT.md). Agent REPL'inde `/api ...` için doğrudan `evren` sağlayıcısını seçin. Birim/kontrat testleri sahte HTTP transport kullanır; gerçek anahtara veya ücretli API çağrılarına ihtiyaç duymaz.
