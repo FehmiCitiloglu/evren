@@ -271,4 +271,17 @@ Agent içinde `!ls -la`, `!git status` veya `/shell pwd` ile yerel terminal komu
 Tek komut için `evren-agent -p '!ls -la'` kullanın; API anahtarı gerekmez.
 Her komut yeni bir shell açar; dizin değiştirmek için `!cd dizin && komut` yazın.
 
+Agent'ın tool çağrıları, argümanları, sonuçları ve Thinking metinleri varsayılan
+olarak katlıdır; sohbet alanında kısa bir işlem özeti görünür. İşlem sürerken
+`Ctrl+O` veya özet satırına tıklama ayrıntı panelini açar/kapatır. Bir satırı
+tıklayarak ya da ok tuşlarıyla seçip `Enter`/`Space` kullanarak içeriğini açın.
+Uzun sonuçlarda ok tuşları, `PageUp`/`PageDown` ve fare tekerleğiyle gezinin.
+
+Yanıttan sonra `Ctrl+O`, alt çubuğa tıklama veya `/details`, oturumdaki geçmiş
+çağrıların ayrıntılarını açar; `Esc`/`Ctrl+O` sohbete döner ve yazmakta olduğunuz
+mesaj korunur. `/clear` bu ayrıntıları da temizler. Katlama yalnızca görünümü
+etkiler: modele iletilen sonuçlar değişmez ve ayrıntılarda eski 200 karakterlik
+önizleme sınırı yoktur. Etkileşimli terminal bulunmadığında `/details` ayrıntıları
+düz metin olarak yazdırır; fare desteği terminale bağlıdır.
+
 [Detaylı MCP, skill, plugin ve agent kullanım kılavuzu](docs/AGENT.md). Agent REPL'inde `/api ...` için doğrudan `evren` sağlayıcısını seçin. Birim/kontrat testleri sahte HTTP transport kullanır; gerçek anahtara veya ücretli API çağrılarına ihtiyaç duymaz.

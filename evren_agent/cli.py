@@ -17,6 +17,7 @@ from rich.text import Text
 
 from evren_agent.core.agent import Agent
 from evren_agent.credentials import ensure_api_key
+from evren_agent.activity import ActivityLog, ActivityView
 
 try:
     from prompt_toolkit import PromptSession
@@ -24,6 +25,9 @@ try:
     from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.formatted_text import HTML
     from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.application import in_terminal
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.mouse_events import MouseEventType
     HAVE_PROMPT_TOOLKIT = True
 except ImportError:
     HAVE_PROMPT_TOOLKIT = False
@@ -138,6 +142,12 @@ COMMANDS_CATALOG: List[Dict[str, str]] = [
         "category": "Tools",
         "syntax": "/tools",
         "description": "Inspect all registered tools, parameters & sources",
+    },
+    {
+        "command": "/details",
+        "category": "Session",
+        "syntax": "/details",
+        "description": "Inspect folded tool calls, full results and thinking (Ctrl+O)",
     },
     {
         "command": "/terms",
@@ -489,6 +499,7 @@ def print_help() -> None:
     d_table.add_row("/terms text", "Read the current terms before accepting")
     d_table.add_row("/terms accept <version>", "Explicitly accept the terms version you have read")
     d_table.add_row("/history", "View message history turns and context stats")
+    d_table.add_row("/details", "Open activity details; Ctrl+O or click opens/closes, Enter folds a row")
     d_table.add_row("/export [file.md]", "Export conversation transcript to a Markdown file [dim](default: session_export.md)[/dim]")
     d_table.add_row("/clear", "Clear conversation history and reset context window")
     d_table.add_row("/exit, /quit", "Safely disconnect all MCP servers and exit the session")
@@ -902,8 +913,40 @@ async def run_repl(agent: Agent) -> None:
     await agent.initialize()
     print_banner(agent)
 
+    activity = ActivityLog()
+    interactive_activity = HAVE_PROMPT_TOOLKIT and console.is_terminal and sys.stdin.isatty()
+
+    async def show_details():
+        if not activity.entries:
+            console.print("[dim]No activity yet.[/dim]")
+        elif interactive_activity:
+            await ActivityView(activity).run()
+        else:
+            console.print(Text(activity.plain_details()))
+
     session: Optional[Any] = None
     if HAVE_PROMPT_TOOLKIT:
+        bindings = KeyBindings()
+
+        async def inspect_from_prompt():
+            async with in_terminal():
+                await show_details()
+
+        @bindings.add("c-o")
+        def open_details(event):
+            event.app.create_background_task(inspect_from_prompt())
+
+        def click_details(event):
+            if event.event_type == MouseEventType.MOUSE_UP:
+                session.app.create_background_task(inspect_from_prompt())
+            else:
+                return NotImplemented
+
+        def activity_toolbar():
+            if activity.entries:
+                return [("", "▶ " + activity.summary + " · Ctrl+O / click: details", click_details)]
+            return "Tool calls and thinking are folded · Ctrl+O / /details: inspect"
+
         history_path = Path.home() / ".evren_agent_history"
         try:
             session = PromptSession(
@@ -911,11 +954,15 @@ async def run_repl(agent: Agent) -> None:
                 history=FileHistory(str(history_path)),
                 auto_suggest=AutoSuggestFromHistory(),
                 complete_while_typing=True,
+                key_bindings=bindings,
+                bottom_toolbar=activity_toolbar if interactive_activity else None,
+                mouse_support=interactive_activity,
             )
         except Exception:
             session = None
 
     if session is None:
+        interactive_activity = False
         setup_readline_completer(agent)
 
     while True:
@@ -933,34 +980,40 @@ async def run_repl(agent: Agent) -> None:
                 continue
 
             if user_input.startswith("/"):
+                if user_input.lower() == "/details":
+                    await show_details()
+                    continue
                 keep_going = await handle_slash_command(agent, user_input)
+                if user_input.split()[0].lower() == "/clear":
+                    activity.entries.clear()
                 if not keep_going:
                     console.print("[cyan]Goodbye![/cyan]")
                     break
                 continue
 
-            # Call agent run
-            thought_buffer = []
+            activity.running = True
 
-            def on_thought(thought_text: str):
-                thought_buffer.append(thought_text)
-                console.print(Panel(thought_text, title="🧠 Evren Thinking", border_style="magenta", expand=False))
-
-            def on_tool_start(tool_name: str, args: dict):
-                console.print(f"🔧 [cyan]Calling tool:[/cyan] [bold]{tool_name}[/bold] [dim]({json.dumps(args)})[/dim]")
-
-            def on_tool_end(tool_name: str, result: str):
-                preview = result[:200] + ("..." if len(result) > 200 else "")
-                console.print(f"✅ [green]Tool result [{tool_name}]:[/green] [dim]{preview}[/dim]")
-
-            with console.status("[bold cyan]Evren is thinking...[/bold cyan]"):
-                response = await agent.run(
+            async def run_agent():
+                return await agent.run(
                     prompt=user_input,
-                    on_thought=on_thought,
-                    on_tool_start=on_tool_start,
-                    on_tool_end=on_tool_end,
+                    on_thought=activity.thought,
+                    on_tool_start=activity.tool_start,
+                    on_tool_end=activity.tool_end,
                 )
 
+            try:
+                if interactive_activity:
+                    response = await ActivityView(activity, live=True).run(run_agent)
+                else:
+                    with console.status("Evren is thinking...") as status:
+                        activity.notify = lambda: status.update(Text(activity.summary))
+                        response = await run_agent()
+            finally:
+                activity.notify = lambda: None
+                activity.finish()
+
+            if activity.entries:
+                console.print(Text(activity.summary + " · /details to inspect", style="dim"))
             console.print("\n[bold cyan]EvrenAgent:[/bold cyan]")
             console.print(Markdown(response))
 
