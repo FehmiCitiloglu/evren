@@ -36,23 +36,26 @@ An extensible, AI Agent framework designed with **Model Context Protocol (MCP)**
 ## 📦 Installation
 
 ```bash
-# Clone and enter directory
-cd /Users/alien/Development/evren
+# Tek komutla kurulum (İşletim sisteminize göre):
+./install.sh         # macOS / Linux
+# veya
+make install         # macOS / Linux (Make ile)
 
-# Create virtual environment with uv or python
-uv venv .venv
+.\install.ps1        # Windows (PowerShell)
 
-# Activate:
-# macOS/Linux (bash/zsh):
-source .venv/bin/activate
-# Windows PowerShell:
-# .\.venv\Scripts\Activate.ps1
-# Windows Command Prompt (CMD):
-# .venv\Scripts\activate.bat
-
-# Install dependencies and editable package
-uv pip install -e .
+python install.py    # Tüm Sistemler (Evrensel Python)
 ```
+
+<details>
+<summary><b>Manuel Kurulum</b></summary>
+
+```bash
+uv venv .venv
+source .venv/bin/activate       # Windows PowerShell: .\.venv\Scripts\Activate.ps1
+uv pip install -e .
+cp .env.example .env            # Windows PowerShell: Copy-Item .env.example .env
+```
+</details>
 
 ---
 

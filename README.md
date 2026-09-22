@@ -10,6 +10,28 @@ EVREN portalında **Platform**, **LLM Çıkarım** ve **Model Çıkarımı** far
 
 Python 3.10+:
 
+### ⚡ Tek Komutla Hızlı Kurulum (Otomatik .venv, paketler ve .env)
+
+İşletim sisteminize göre tek bir komut çalıştırmanız yeterlidir:
+
+```bash
+# macOS / Linux:
+./install.sh
+# veya
+make install
+
+# Windows (PowerShell):
+.\install.ps1
+
+# Tüm Sistemler (Evrensel Python):
+python install.py
+```
+
+Kurulum betiği `uv` (varsa) veya Python'un yerleşik `venv` + `pip` modülünü kullanarak sanal ortamı kurar, bağımlılıkları yükler ve `.env` şablonunu hazırlar.
+
+<details>
+<summary><b>Manuel Kurulum Adımları (İsteğe Bağlı)</b></summary>
+
 ```bash
 # macOS / Linux (bash/zsh):
 uv venv .venv
@@ -18,17 +40,18 @@ uv pip install -e '.[dev]'
 cp .env.example .env
 
 # Windows (PowerShell):
-# uv venv .venv
-# .\.venv\Scripts\Activate.ps1
-# uv pip install -e '.[dev]'
-# Copy-Item .env.example .env
+uv venv .venv
+.\.venv\Scripts\Activate.ps1
+uv pip install -e '.[dev]'
+Copy-Item .env.example .env
 
 # Windows (Command Prompt - CMD):
-# uv venv .venv
-# .venv\Scripts\activate.bat
-# uv pip install -e '.[dev]'
-# copy .env.example .env
+uv venv .venv
+.venv\Scripts\activate.bat
+uv pip install -e '.[dev]'
+copy .env.example .env
 ```
+</details>
 
 Mevcut `.env` dosyanız varsa üzerine kopyalamayın. Dosyaya portalda e-Devlet ile giriş yaptıktan sonra aldığınız **LLM Çıkarım** anahtarını ekleyin:
 
