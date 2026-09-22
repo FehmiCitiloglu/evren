@@ -127,6 +127,11 @@ async def test_agent_meta_tools():
     r_res = agent.read_file("test_scratch.txt")
     assert r_res == "Hello Evren Agent!"
 
+    # 3. Test run_command meta-tool
+    cmd_res = agent.run_command("python3 -c \"print('Hello from shell')\"")
+    assert "Hello from shell" in cmd_res
+    assert "Exit code 0" in cmd_res
+
     # Clean up
     import os
     if os.path.exists("test_scratch.txt"):

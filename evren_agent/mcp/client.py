@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 from typing import Any, Dict, List, Optional
 import httpx
 
@@ -73,9 +74,10 @@ class MCPClient:
         cmd_env = os.environ.copy()
         cmd_env.update(self.env)
 
-        logger.info("Launching MCP server '%s': %s %s", self.name, self.command, " ".join(self.args))
+        exec_cmd = (shutil.which(self.command) if self.command else None) or self.command
+        logger.info("Launching MCP server '%s': %s %s", self.name, exec_cmd, " ".join(self.args))
         self._process = await asyncio.create_subprocess_exec(
-            self.command,  # type: ignore
+            exec_cmd,  # type: ignore
             *self.args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,

@@ -389,16 +389,45 @@ class Agent:
             prov.set_model(model_name)
         return f"Switched to provider '{prov.name}' with model '{prov.current_model}'."
 
-    def run_command(self, command: str) -> str:
+    def run_command(self, command: str, shell: Optional[str] = None) -> str:
         try:
-            res = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            out = res.stdout
+            is_windows = sys.platform == "win32"
+            selected_shell = (shell or "").lower().strip()
+
+            if selected_shell in ("powershell", "pwsh"):
+                ps_bin = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
+                args = [ps_bin, "-NoProfile", "-NonInteractive", "-Command", command]
+                res = subprocess.run(
+                    args,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=60,
+                )
+            elif selected_shell == "cmd" or (is_windows and not selected_shell):
+                # On Windows default to cmd /c or explicit cmd
+                cmd_bin = os.environ.get("COMSPEC", "cmd.exe") if is_windows else "cmd.exe"
+                res = subprocess.run(
+                    [cmd_bin, "/c", command] if is_windows else command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=60,
+                )
+            else:
+                res = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=60,
+                )
+            out = res.stdout or ""
             if res.stderr:
                 out += f"\n[stderr]:\n{res.stderr}"
             return f"Exit code {res.returncode}:\n{out.strip()}"

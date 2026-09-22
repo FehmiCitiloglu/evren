@@ -3,9 +3,10 @@ import argparse
 import asyncio
 import json
 import logging
+from pathlib import Path
 import sys
 import shlex
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -14,7 +15,380 @@ from rich.table import Table
 
 from evren_agent.core.agent import Agent
 
+try:
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+    from prompt_toolkit.completion import Completer, Completion
+    from prompt_toolkit.formatted_text import HTML
+    from prompt_toolkit.history import FileHistory
+    HAVE_PROMPT_TOOLKIT = True
+except ImportError:
+    HAVE_PROMPT_TOOLKIT = False
+
 console = Console()
+
+COMMANDS_CATALOG: List[Dict[str, str]] = [
+    {
+        "command": "/help",
+        "category": "Reference",
+        "syntax": "/help",
+        "description": "Show categorized guide with practical examples",
+    },
+    {
+        "command": "/commands",
+        "category": "Reference",
+        "syntax": "/commands [category]",
+        "description": "List all slash commands and usage",
+    },
+    {
+        "command": "/list",
+        "category": "Reference",
+        "syntax": "/list [category]",
+        "description": "Alias for /commands (list all commands)",
+    },
+    {
+        "command": "/status",
+        "category": "Diagnostics",
+        "syntax": "/status",
+        "description": "Agent diagnostics (provider, model, tools, skills, turns)",
+    },
+    {
+        "command": "/provider",
+        "category": "Providers",
+        "syntax": "/provider [name]",
+        "description": "View active provider or switch provider (evren, llmtr, openai)",
+    },
+    {
+        "command": "/model",
+        "category": "Models",
+        "syntax": "/model [id]",
+        "description": "List known models or switch active model",
+    },
+    {
+        "command": "/mcp list",
+        "category": "MCP",
+        "syntax": "/mcp list",
+        "description": "List connected MCP servers and exposed tools",
+    },
+    {
+        "command": "/mcp add",
+        "category": "MCP",
+        "syntax": "/mcp add <name> <cmd> [args...]",
+        "description": "Connect a new stdio/HTTP MCP server dynamically",
+    },
+    {
+        "command": "/mcp remove",
+        "category": "MCP",
+        "syntax": "/mcp remove <name>",
+        "description": "Disconnect an MCP server and unmount its tools",
+    },
+    {
+        "command": "/skill list",
+        "category": "Skills",
+        "syntax": "/skill list",
+        "description": "List available skills and active status",
+    },
+    {
+        "command": "/skill on",
+        "category": "Skills",
+        "syntax": "/skill on <name>",
+        "description": "Activate skill (e.g. computer-use, code_assistant)",
+    },
+    {
+        "command": "/skill off",
+        "category": "Skills",
+        "syntax": "/skill off <name>",
+        "description": "Deactivate skill prompt augmentation",
+    },
+    {
+        "command": "/skill info",
+        "category": "Skills",
+        "syntax": "/skill info <name>",
+        "description": "Inspect skill instructions and tags",
+    },
+    {
+        "command": "/skill add",
+        "category": "Skills",
+        "syntax": "/skill add",
+        "description": "Interactive wizard to create & persist a new skill",
+    },
+    {
+        "command": "/plugin list",
+        "category": "Plugins",
+        "syntax": "/plugin list",
+        "description": "List loaded plugins, versions, and injected tools",
+    },
+    {
+        "command": "/plugin add",
+        "category": "Plugins",
+        "syntax": "/plugin add <file.py>",
+        "description": "Load Python plugin dynamically from file",
+    },
+    {
+        "command": "/tools",
+        "category": "Tools",
+        "syntax": "/tools",
+        "description": "Inspect all registered tools, parameters & sources",
+    },
+    {
+        "command": "/terms",
+        "category": "EVREN API",
+        "syntax": "/terms [status|text|accept <ver>]",
+        "description": "Check status, read text, or accept terms",
+    },
+    {
+        "command": "/api",
+        "category": "EVREN API",
+        "syntax": "/api <command> [args...]",
+        "description": "Direct EVREN API CLI (models, quota, ocr, chat...)",
+    },
+    {
+        "command": "/history",
+        "category": "Session",
+        "syntax": "/history",
+        "description": "View conversation message turns and context stats",
+    },
+    {
+        "command": "/export",
+        "category": "Session",
+        "syntax": "/export [file.md]",
+        "description": "Export transcript with reasoning to Markdown",
+    },
+    {
+        "command": "/clear",
+        "category": "Session",
+        "syntax": "/clear",
+        "description": "Clear conversation history & reset memory",
+    },
+    {
+        "command": "/exit",
+        "category": "Session",
+        "syntax": "/exit (or /quit)",
+        "description": "Disconnect MCP servers and quit session",
+    },
+]
+
+
+def print_commands_table(category_filter: Optional[str] = None) -> None:
+    """Print structured list of all slash commands."""
+    title = "📋 Available Slash Commands"
+    if category_filter:
+        title += f" (Filter: {category_filter})"
+
+    table = Table(title=title, border_style="cyan", show_header=True, header_style="bold cyan")
+    table.add_column("Command", style="bold cyan", no_wrap=True)
+    table.add_column("Category", style="bold magenta")
+    table.add_column("Syntax", style="yellow")
+    table.add_column("Description")
+
+    items = COMMANDS_CATALOG
+    if category_filter:
+        f = category_filter.lower().strip()
+        items = [i for i in items if f in i["category"].lower() or f in i["command"].lower()]
+
+    for item in items:
+        table.add_row(item["command"], item["category"], item["syntax"], item["description"])
+
+    console.print(table)
+    console.print("[dim]Tip: Press [bold]Tab[/bold] or type [bold]/[/bold] for interactive autocompletion.[/dim]\n")
+
+
+class AgentCompleter(Completer if HAVE_PROMPT_TOOLKIT else object):  # type: ignore
+    """Context-aware autocompleter for EvrenAgent REPL."""
+
+    def __init__(self, agent: Agent):
+        self.agent = agent
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        is_tab = complete_event and complete_event.completion_requested
+
+        # If empty line and user pressed Tab: show root commands
+        if not text and is_tab:
+            seen_roots = set()
+            for item in COMMANDS_CATALOG:
+                r = item["command"].split()[0]
+                if r not in seen_roots:
+                    seen_roots.add(r)
+                    yield Completion(r, start_position=0, display=r, display_meta=item["description"])
+            return
+
+        # Do not autocomplete regular prompt text unless it begins with /
+        if not text.startswith("/"):
+            return
+
+        parts = text.split(" ")
+
+        # 1. Root command completion
+        if len(parts) == 1:
+            prefix = parts[0].lower()
+            seen_roots = set()
+            for item in COMMANDS_CATALOG:
+                r = item["command"].split()[0]
+                if r.lower().startswith(prefix) and r not in seen_roots:
+                    seen_roots.add(r)
+                    yield Completion(
+                        r,
+                        start_position=-len(prefix),
+                        display=r,
+                        display_meta=item["description"],
+                    )
+            return
+
+        # 2. Subcommands and argument completion
+        root = parts[0].lower()
+        sub = parts[1].lower() if len(parts) > 1 else ""
+
+        if root in ("/commands", "/list"):
+            if len(parts) == 2:
+                prefix = parts[1].lower()
+                categories = ["reference", "diagnostics", "providers", "models", "mcp", "skills", "plugins", "tools", "evren api", "session"]
+                for cat in categories:
+                    if cat.startswith(prefix):
+                        yield Completion(cat, start_position=-len(parts[1]), display_meta="Filter category")
+
+        elif root == "/provider":
+            if len(parts) == 2:
+                prefix = parts[1].lower()
+                try:
+                    for p in self.agent.providers.list_providers():
+                        if p.lower().startswith(prefix):
+                            meta = "Active Provider" if p == self.agent.providers.active_name else "Provider"
+                            yield Completion(p, start_position=-len(parts[1]), display_meta=meta)
+                except Exception:
+                    pass
+
+        elif root == "/model":
+            if len(parts) == 2:
+                prefix = parts[1].lower()
+                try:
+                    prov = self.agent.providers.get_active()
+                    known = getattr(prov, "known_models", [])
+                    for m in known:
+                        m_id = m.get("id") if isinstance(m, dict) else getattr(m, "id", str(m))
+                        m_name = m.get("name") if isinstance(m, dict) else getattr(m, "name", "")
+                        if m_id and m_id.lower().startswith(prefix):
+                            yield Completion(m_id, start_position=-len(parts[1]), display_meta=m_name or "Model")
+                except Exception:
+                    pass
+
+        elif root == "/mcp":
+            if len(parts) == 2:
+                prefix = parts[1].lower()
+                for sc, desc in [("list", "List servers"), ("add", "Connect server"), ("remove", "Disconnect server")]:
+                    if sc.startswith(prefix):
+                        yield Completion(sc, start_position=-len(parts[1]), display_meta=desc)
+            elif len(parts) == 3 and sub == "remove":
+                prefix = parts[2].lower()
+                try:
+                    for s in self.agent.mcp.list_servers():
+                        s_name = s.get("name", "")
+                        if s_name.lower().startswith(prefix):
+                            yield Completion(s_name, start_position=-len(parts[2]), display_meta="Connected MCP Server")
+                except Exception:
+                    pass
+
+        elif root == "/skill":
+            if len(parts) == 2:
+                prefix = parts[1].lower()
+                for sc, desc in [
+                    ("list", "List all skills"),
+                    ("on", "Activate skill"),
+                    ("off", "Deactivate skill"),
+                    ("info", "Inspect skill instructions"),
+                    ("add", "Add new skill"),
+                ]:
+                    if sc.startswith(prefix):
+                        yield Completion(sc, start_position=-len(parts[1]), display_meta=desc)
+            elif len(parts) == 3:
+                prefix = parts[2].lower()
+                try:
+                    for s in self.agent.skills.skills.values():
+                        name = s.name
+                        if sub == "on" and s.is_active:
+                            continue
+                        if sub == "off" and not s.is_active:
+                            continue
+                        if name.lower().startswith(prefix) or name.replace("_", "-").startswith(prefix):
+                            meta = "Active" if s.is_active else "Inactive"
+                            desc = f"{meta}: {s.description[:30]}..." if s.description else meta
+                            yield Completion(name, start_position=-len(parts[2]), display_meta=desc)
+                except Exception:
+                    pass
+
+        elif root == "/plugin":
+            if len(parts) == 2:
+                prefix = parts[1].lower()
+                for sc, desc in [("list", "List plugins"), ("add", "Load plugin file")]:
+                    if sc.startswith(prefix):
+                        yield Completion(sc, start_position=-len(parts[1]), display_meta=desc)
+
+        elif root == "/terms":
+            if len(parts) == 2:
+                prefix = parts[1].lower()
+                for sc, desc in [("status", "Check status"), ("text", "View terms text"), ("accept", "Accept version")]:
+                    if sc.startswith(prefix):
+                        yield Completion(sc, start_position=-len(parts[1]), display_meta=desc)
+
+        elif root == "/api":
+            if len(parts) == 2:
+                prefix = parts[1].lower()
+                api_subcommands = [
+                    ("models", "List models & prices"),
+                    ("quota", "Check quota & credits"),
+                    ("chat", "Chat completion"),
+                    ("completions", "Text completion"),
+                    ("responses", "Responses endpoint"),
+                    ("embeddings", "Text embeddings"),
+                    ("rerank", "Rerank documents"),
+                    ("ocr", "OCR image recognition"),
+                    ("transcribe", "Audio transcription"),
+                    ("media", "Media upload/status"),
+                    ("health", "Service health check"),
+                    ("terms", "Terms of service status"),
+                    ("api-docs", "API contract documentation"),
+                ]
+                for sc, desc in api_subcommands:
+                    if sc.startswith(prefix):
+                        yield Completion(sc, start_position=-len(parts[1]), display_meta=desc)
+
+
+def setup_readline_completer(agent: Agent):
+    """Fallback readline completion for platforms or setups without prompt_toolkit."""
+    try:
+        import readline
+
+        def rl_completer(text: str, state: int):
+            line = readline.get_line_buffer()
+            if not line.startswith("/"):
+                return None
+            parts = line.split(" ")
+            candidates = []
+            if len(parts) <= 1:
+                prefix = line.lower()
+                candidates = [i["command"].split()[0] for i in COMMANDS_CATALOG if i["command"].lower().startswith(prefix)]
+            elif len(parts) == 2:
+                root = parts[0].lower()
+                prefix = parts[1].lower()
+                if root == "/provider":
+                    candidates = [p for p in agent.providers.list_providers() if p.lower().startswith(prefix)]
+                elif root == "/skill":
+                    candidates = [sc for sc in ["list", "on", "off", "info", "add"] if sc.startswith(prefix)]
+                elif root == "/mcp":
+                    candidates = [sc for sc in ["list", "add", "remove"] if sc.startswith(prefix)]
+                elif root == "/plugin":
+                    candidates = [sc for sc in ["list", "add"] if sc.startswith(prefix)]
+                elif root == "/terms":
+                    candidates = [sc for sc in ["status", "text", "accept"] if sc.startswith(prefix)]
+            elif len(parts) == 3 and parts[0].lower() == "/skill":
+                prefix = parts[2].lower()
+                candidates = [s.name for s in agent.skills.skills.values() if s.name.lower().startswith(prefix)]
+            return candidates[state] if state < len(candidates) else None
+
+        readline.set_completer(rl_completer)
+        readline.parse_and_bind("tab: complete")
+    except Exception:
+        pass
 
 
 def print_banner(agent: Agent) -> None:
@@ -29,7 +403,7 @@ def print_banner(agent: Agent) -> None:
 [green]Skills:[/green]   {', '.join(active_skills) or '[dim]none[/dim]'}
 [green]MCPs:[/green]     {mcp_count} servers connected
 [green]Plugins:[/green]  {plugins_count} active
-[dim]Type [bold]/help[/bold] for commands or start chatting below.[/dim]"""
+[dim]Type [bold]/commands[/bold] or [bold]/help[/bold] for commands (Tab for autocomplete), or start chatting below.[/dim]"""
 
     console.print(Panel(content, title="🚀 EvrenAgent", border_style="cyan"))
 
@@ -116,6 +490,10 @@ async def handle_slash_command(agent: Agent, cmd: str) -> bool:
 
     if root == "/help":
         print_help()
+
+    elif root in ("/commands", "/list"):
+        cat_filter = parts[1] if len(parts) > 1 else None
+        print_commands_table(cat_filter)
 
     elif root == "/api":
         from evren_agent.api.cli import run as run_api
@@ -408,9 +786,29 @@ async def run_repl(agent: Agent) -> None:
     await agent.initialize()
     print_banner(agent)
 
+    session: Optional[Any] = None
+    if HAVE_PROMPT_TOOLKIT:
+        history_path = Path.home() / ".evren_agent_history"
+        try:
+            session = PromptSession(
+                completer=AgentCompleter(agent),
+                history=FileHistory(str(history_path)),
+                auto_suggest=AutoSuggestFromHistory(),
+                complete_while_typing=True,
+            )
+        except Exception:
+            session = None
+
+    if session is None:
+        setup_readline_completer(agent)
+
     while True:
         try:
-            user_input = Prompt.ask("\n[bold green]You[/bold green]").strip()
+            if session is not None:
+                user_input = (await session.prompt_async(HTML("<ansigreen><b>You</b></ansigreen> > "))).strip()
+            else:
+                user_input = Prompt.ask("\n[bold green]You[/bold green]").strip()
+
             if not user_input:
                 continue
 
@@ -464,9 +862,14 @@ def main():
     parser.add_argument("--provider", type=str, help="Provider name (evren, llmtr, openai)")
     parser.add_argument("--model", "-m", type=str, help="Model ID")
     parser.add_argument("--config", "-c", type=str, help="Path to config.yaml")
+    parser.add_argument("--commands", "--list-commands", action="store_true", help="List all available slash commands and exit")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()
+
+    if args.commands:
+        print_commands_table()
+        return
 
     if args.debug:
         logging.basicConfig(level=logging.DEBUG)

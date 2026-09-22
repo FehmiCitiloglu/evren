@@ -11,10 +11,23 @@ EVREN portalında **Platform**, **LLM Çıkarım** ve **Model Çıkarımı** far
 Python 3.10+:
 
 ```bash
+# macOS / Linux (bash/zsh):
 uv venv .venv
 source .venv/bin/activate
 uv pip install -e '.[dev]'
 cp .env.example .env
+
+# Windows (PowerShell):
+# uv venv .venv
+# .\.venv\Scripts\Activate.ps1
+# uv pip install -e '.[dev]'
+# Copy-Item .env.example .env
+
+# Windows (Command Prompt - CMD):
+# uv venv .venv
+# .venv\Scripts\activate.bat
+# uv pip install -e '.[dev]'
+# copy .env.example .env
 ```
 
 Mevcut `.env` dosyanız varsa üzerine kopyalamayın. Dosyaya portalda e-Devlet ile giriş yaptıktan sonra aldığınız **LLM Çıkarım** anahtarını ekleyin:

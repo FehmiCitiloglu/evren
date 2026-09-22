@@ -41,7 +41,14 @@ cd /Users/alien/Development/evren
 
 # Create virtual environment with uv or python
 uv venv .venv
+
+# Activate:
+# macOS/Linux (bash/zsh):
 source .venv/bin/activate
+# Windows PowerShell:
+# .\.venv\Scripts\Activate.ps1
+# Windows Command Prompt (CMD):
+# .venv\Scripts\activate.bat
 
 # Install dependencies and editable package
 uv pip install -e .
@@ -96,9 +103,12 @@ evren-agent --provider llmtr --model evren/glm-5.3-fp8
 
 ### Slash Commands in REPL
 
+> 💡 **Autocomplete:** Press **Tab** or start typing `/` for instant autocomplete across commands, subcommands, models, providers, and skills.
+
 | Command | Category | Description & Practical Example |
 |---|---|---|
 | `/help` | General | Show the categorized beneficial commands reference guide |
+| `/commands` / `/list` | General | List all available slash commands with syntax and optional category filter (`/list skills`) |
 | `/status` | Diagnostics | Display full agent diagnostics (provider, model, tools, skills, message count) |
 | `/provider [name]` | Providers | Switch or list providers (`/provider evren`, `/provider llmtr`, `/provider openai`) |
 | `/model [name]` | Models | Switch active model (`/model glm-5.3`, `/model evren/glm-5.3-fp8`) or list models |
