@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # EVREN CLI & Agent — Unix/Linux/macOS Installer
-set -e
+set -euo pipefail
 
-# Change directory to script location
-cd "$(dirname "$0")"
+# Keep installation logic in install.py so every entry point configures
+# the same isolated venv, command launchers, and persistent user PATH.
+EVREN_INSTALL_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-# Execute Python installer
+echo "EVREN kurulumu: evren ve evren-agent PATH'e eklenecek; venv aktivasyonu gerekmeyecek."
+echo "Kurulumdan sonra yeni terminal açın veya gösterilen PATH komutunu bir kez çalıştırın."
+
+# exec preserves the Python installer's exit status and forwarded arguments.
 if command -v python3 >/dev/null 2>&1; then
-    exec python3 install.py "$@"
+    exec python3 "$EVREN_INSTALL_DIR/install.py" "$@"
 elif command -v python >/dev/null 2>&1; then
-    exec python install.py "$@"
+    exec python "$EVREN_INSTALL_DIR/install.py" "$@"
 else
     echo "Error: Python 3 is required but not found in PATH." >&2
     echo "Please install Python 3.10+ (or 'brew install python' / 'sudo apt install python3')." >&2

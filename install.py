@@ -5,12 +5,92 @@ Supports: macOS, Linux, and Windows (PowerShell / CMD)
 Requirements: Python 3.10+
 """
 import os
+import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 MIN_PYTHON = (3, 10)
+COMMANDS = ("evren", "evren-agent")
+
+
+def install_commands(venv_dir: Path, bin_dir: Path, is_windows: bool):
+    """Expose only EVREN commands; their launchers retain the venv interpreter."""
+    scripts_dir = venv_dir / ("Scripts" if is_windows else "bin")
+    suffix = ".exe" if is_windows else ""
+    pairs = [(scripts_dir / (name + suffix), bin_dir / (name + suffix)) for name in COMMANDS]
+    for source, target in pairs:
+        if not source.is_file():
+            raise RuntimeError(f"Installed command missing: {source}")
+        if not is_windows and (target.exists() or target.is_symlink()):
+            if not target.is_symlink() or target.resolve() != source.resolve():
+                raise RuntimeError(f"Cannot replace existing command: {target}. Move it aside and retry.")
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    for source, target in pairs:
+        if is_windows:
+            # pip's Windows launchers embed the absolute venv Python path.
+            shutil.copy2(source, target)
+        elif not target.is_symlink():
+            target.symlink_to(source)
+
+
+def add_shell_path(path: Path, line: str):
+    """Append an idempotent PATH entry without replacing existing shell settings."""
+    contents = path.read_text() if path.exists() else ""
+    if line in contents.splitlines():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as stream:
+        stream.write(f"\n# EVREN CLI (no virtual environment activation required)\n{line}\n")
+
+
+def configure_path(bin_dir: Path, is_windows: bool) -> list[str]:
+    """Persist the user PATH and return instructions for already-open terminals."""
+    if is_windows:
+        import winreg
+
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            try:
+                current, value_type = winreg.QueryValueEx(key, "Path")
+            except FileNotFoundError:
+                current, value_type = "", winreg.REG_EXPAND_SZ
+            entries = [os.path.normcase(os.path.expandvars(p.strip('"'))) for p in current.split(";")]
+            if os.path.normcase(str(bin_dir)) not in entries:
+                winreg.SetValueEx(key, "Path", 0, value_type, str(bin_dir) + (";" + current if current else ""))
+        # Let Explorer and newly launched terminals see the changed user PATH.
+        import ctypes
+
+        result = ctypes.c_size_t()
+        ctypes.windll.user32.SendMessageTimeoutW(
+            0xFFFF, 0x001A, 0, ctypes.c_wchar_p("Environment"), 0x0002, 5000,
+            ctypes.byref(result),
+        )
+        ps_path = str(bin_dir).replace("'", "''")
+        return [f"PowerShell: $env:Path = '{ps_path};' + $env:Path", f'CMD: set "PATH={bin_dir};%PATH%"']
+
+    home = Path.home()
+    shell = Path(os.environ.get("SHELL", "/bin/sh")).name
+    quoted = shlex.quote(str(bin_dir))
+    line = f'case ":$PATH:" in *:{quoted}:*) ;; *) export PATH={quoted}:"$PATH" ;; esac'
+    if shell == "zsh":
+        zdotdir = Path(os.environ.get("ZDOTDIR") or home)
+        profiles = [zdotdir / ".zshrc", zdotdir / ".zprofile"]
+    elif shell == "bash":
+        login = next((home / name for name in (".bash_profile", ".bash_login", ".profile")
+                      if (home / name).exists()), home / ".profile")
+        profiles = [home / ".bashrc", login]
+    elif shell == "fish":
+        config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+        fish_path = str(bin_dir).replace("\\", "\\\\").replace("'", "\\'")
+        line = f"contains -- '{fish_path}' $PATH; or set -gx PATH '{fish_path}' $PATH"
+        profiles = [config / "fish" / "conf.d" / "evren.fish"]
+    else:
+        profiles = [home / ".profile"]
+        log(f"  PATH saved in ~/.profile; configure {shell}'s startup file if it does not read this file.", "yellow")
+    for profile in profiles:
+        add_shell_path(profile, line)
+    return [line if shell == "fish" else f'export PATH={quoted}:"$PATH"']
 
 
 def log(msg: str, color: str = ""):
@@ -58,31 +138,29 @@ def main():
     # Virtual environment paths
     if is_windows:
         venv_python = venv_dir / "Scripts" / "python.exe"
-        activate_cmd = ".\\.venv\\Scripts\\Activate.ps1"
-        cmd_activate = ".venv\\Scripts\\activate.bat"
+        bin_dir = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "EVREN" / "bin"
     else:
         venv_python = venv_dir / "bin" / "python"
-        activate_cmd = "source .venv/bin/activate"
-        cmd_activate = ""
+        bin_dir = Path.home() / ".local" / "bin"
 
     # Step 1: Create venv
     if not venv_dir.exists():
-        log("\n[1/3] Creating virtual environment (.venv)...", "cyan")
+        log("\n[1/4] Creating virtual environment (.venv)...", "cyan")
         if uv_bin:
             log("  Using 'uv venv'...", "dim")
-            subprocess.run([uv_bin, "venv", str(venv_dir)], check=True)
+            subprocess.run([uv_bin, "venv", "--python", sys.executable, str(venv_dir)], check=True)
         else:
             log("  Using 'python -m venv'...", "dim")
             subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
         log("✔ Virtual environment created at .venv", "green")
     else:
-        log("\n[1/3] Existing virtual environment detected (.venv)", "green")
+        log("\n[1/4] Existing virtual environment detected (.venv)", "green")
 
     # Step 2: Install dependencies & package in editable mode
-    log("\n[2/3] Installing dependencies and package...", "cyan")
+    log("\n[2/4] Installing dependencies and package...", "cyan")
     if uv_bin:
         log("  Running 'uv pip install -e .[dev]'...", "dim")
-        subprocess.run([uv_bin, "pip", "install", "-e", ".[dev]"], check=True)
+        subprocess.run([uv_bin, "pip", "install", "--python", str(venv_python), "-e", ".[dev]"], check=True)
     else:
         log("  Upgrading pip...", "dim")
         subprocess.run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
@@ -91,7 +169,7 @@ def main():
     log("✔ Package evren-agent and dependencies installed successfully", "green")
 
     # Step 3: Setup .env file
-    log("\n[3/3] Checking environment configuration (.env)...", "cyan")
+    log("\n[3/4] Checking environment configuration (.env)...", "cyan")
     env_file = root_dir / ".env"
     env_example = root_dir / ".env.example"
     if not env_file.exists() and env_example.exists():
@@ -100,19 +178,21 @@ def main():
     elif env_file.exists():
         log("✔ Existing .env preserved (not overwritten)", "green")
 
+    log("\n[4/4] Making EVREN commands available without activation...", "cyan")
+    install_commands(venv_dir, bin_dir, is_windows)
+    refresh_commands = configure_path(bin_dir, is_windows)
+    log(f"✔ Commands installed in {bin_dir}", "green")
+
     # Done! Display instructions
     log("\n" + "=" * 55, "green")
     log("  🎉 Installation Complete!", "bold")
     log("=" * 55, "green")
 
     log("\n📌 Next Steps:", "cyan")
-    if is_windows:
-        log(f"  1. Activate virtual environment:", "yellow")
-        log(f"     PowerShell:  {activate_cmd}", "bold")
-        log(f"     CMD:         {cmd_activate}", "bold")
-    else:
-        log(f"  1. Activate virtual environment:", "yellow")
-        log(f"     {activate_cmd}", "bold")
+    log("  No virtual environment activation needed.", "green")
+    log("  1. Open a new terminal, or refresh PATH in this terminal once:", "yellow")
+    for command in refresh_commands:
+        log(f"     {command}", "bold")
 
     log("\n  2. Configure your EVREN API Key in .env:", "yellow")
     log("     EVREN_API_KEY=evren_llm_your_key_here", "dim")

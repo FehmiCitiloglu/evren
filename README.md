@@ -29,6 +29,12 @@ python install.py
 
 Kurulum betiği `uv` (varsa) veya Python'un yerleşik `venv` + `pip` modülünü kullanarak sanal ortamı kurar, bağımlılıkları yükler ve `.env` şablonunu hazırlar.
 
+**Venv'i aktive etmeniz gerekmez.** Kurulum, `evren` ve `evren-agent` komutlarını macOS/Linux'ta `~/.local/bin`, Windows'ta `%LOCALAPPDATA%\EVREN\bin` üzerinden erişilebilir yapar ve kullanıcı PATH ayarını kaydeder. macOS/Linux'ta kullanılan kabuğun zsh, bash veya fish başlangıç dosyası güncellenir. Diğer kabuklarda `~/.profile` güncellenir; kabuğunuz bu dosyayı okumuyorsa PATH'i kendi başlangıç dosyanıza ekleyin.
+
+İlk kurulumdan sonra **yeni bir terminal açın** veya kurulumun sonunda gösterilen PATH komutunu mevcut terminalde bir kez çalıştırın. Kurulum betiği, kendisini başlatan terminalin ortamını doğrudan değiştiremez. Sonrasında `evren --help` ve `evren-agent --commands` herhangi bir klasörden çalışır; bağımlılıklar projenin `.venv` ortamında kalır. Proje klasörünü veya `.venv` dizinini silmeyin; projeyi taşırsanız `.venv` ortamını yeniden oluşturup kurulumu tekrar çalıştırın. `config.yaml` gibi göreli dosya yolları komutu çalıştırdığınız klasöre göre değerlendirilir.
+
+`install.sh` ve `install.ps1` aynı `install.py` kurulumunu çalıştırır; üç giriş noktası da aktivasyonsuz kullanımı ayarlar. Windows'ta `install.ps1` mevcut PowerShell oturumunun PATH'ini de yeniler; bu oturumda yeni terminal açmadan komutları kullanabilirsiniz.
+
 <details>
 <summary><b>Manuel Kurulum Adımları (İsteğe Bağlı)</b></summary>
 
