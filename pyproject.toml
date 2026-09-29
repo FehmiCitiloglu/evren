@@ -16,6 +16,9 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "keyring>=25.0.0",
     "prompt-toolkit>=3.0.0",
+    "customtkinter>=6.0.0",
+    "pillow>=10.0.0",
+    "darkdetect>=0.8.0",
 ]
 
 [project.optional-dependencies]
@@ -27,9 +30,11 @@ dev = [
 [project.scripts]
 evren-agent = "evren_agent.cli:main"
 evren = "evren_agent.api.cli:main"
+evren-gui = "evren_agent.ui.app:main"
 
 [tool.setuptools.package-data]
 "evren_agent.api" = ["openapi.json"]
+"evren_agent.ui" = ["assets/*"]
 "evren_agent" = ["builtin_skills/*/*.md", "builtin_skills/*/*.yaml"]
 
 [tool.setuptools.packages.find]

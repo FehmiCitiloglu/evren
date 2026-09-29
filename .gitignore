@@ -6,3 +6,5 @@ __pycache__/
 .env
 skills/aviation_specialist/
 plugins/unit_converter.py
+build/
+dist/

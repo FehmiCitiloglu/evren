@@ -121,8 +121,37 @@ python -m evren_agent.api.cli models
 | `health [--ready]` | Anahtarsız servis durumu |
 | `request METHOD PATH` | Belgelenmiş uçlara tam JSON gönderme |
 | `api-docs` | Çevrimdışı endpoint listesi, `--schema` ile OpenAPI sözleşmesi |
+| `gui` | Çapraz platform masaüstü grafiksel kullanıcı arayüzünü (`evren`) başlatır |
 
 Her komutta `--help` bulunur. API komutları agent, plugin veya MCP sunucusu başlatmaz; LLMTR'ye otomatik yönlendirme yapmaz.
+
+## Masaüstü Uygulaması (`evren`)
+
+EVREN LLM API'sini grafiksel kullanıcı arayüzü ile kullanmak için çapraz platform (macOS, Windows, Linux) ve tamamen Türkçe tasarlanmış modern masaüstü uygulamasıdır. Pencere başlığı ve uygulama adı yalnızca **`evren`** olarak tanımlanmıştır.
+
+### Başlatma Seçenekleri:
+
+```bash
+# Terminalden:
+evren gui
+# veya
+evren-gui
+# veya
+python -m evren_agent.ui
+```
+
+Grafik ortamda çift tıklayarak çalıştırmak için:
+- **macOS:** `evren.command`
+- **Windows:** `evren.bat`
+- **Linux:** `evren.desktop` (Sistem menüsüne eklemek için `~/.local/share/applications/` içine kopyalanabilir)
+
+### Temel Özellikler:
+- 💬 **Sohbet:** Gerçek zamanlı akışlı (streaming) yanıt üretimi, görsel yükleme (multimodal analiz), sistem talimatı, sıcaklık ve token sınırı ayarları, canlı veri araçları, sohbet geçmişini temizleme ve dışa aktarma (Markdown/JSON).
+- 👁️ **Görsel & OCR:** Belgeleri, faturaları ve fotoğrafları önizleme, EVREN OCR modelleriyle metin çıkarma, panoya kopyalama ve `.txt` olarak kaydetme.
+- 🎙️ **Ses Çözümleme:** MP3, WAV, M4A, OGG ve FLAC ses kayıtlarını metne ve zaman damgalı SRT altyazılara dönüştürme.
+- 🔍 **Yeniden Sıralama (Rerank):** Arama sorguları ve belge listelerini semantik alaka puanlarına göre sıralama.
+- 📊 **Kota ve Durum:** Canlı bakiye ve token kotası sorgulama, sunucu sağlık/hazırlık (`/healthz`, `/readyz`) kontrolleri ve resmi Kullanım Şartları (Terms) metnini okuyup onaylama.
+- ⚙️ **Ayarlar:** API taban adresi yapılandırması, API anahtarını işletim sisteminin şifreli kasasında (macOS Keychain, Windows Credential Manager, Linux Secret Service) saklama, açık/koyu tema ve arayüz ölçeklendirme.
 
 ## Sohbet, görsel anlama ve akış
 

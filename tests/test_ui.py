@@ -1,0 +1,93 @@
+"""evren masaüstü uygulaması birim ve entegrasyon testleri."""
+from __future__ import annotations
+
+import httpx
+import pytest
+
+from evren_agent.api.client import EvrenAPIError
+from evren_agent.ui.app import EvrenApp
+from evren_agent.ui.icons import ensure_app_icon
+from evren_agent.ui.service import EvrenService, turkce_hata_mesaji
+from evren_agent.ui.theme import APP_NAME, THEME_COLORS
+
+
+def test_app_title_is_evren():
+    """Uygulama adı ve pencere başlığının sadece 'evren' olduğunu doğrular."""
+    assert APP_NAME == "evren"
+    app = EvrenApp()
+    try:
+        assert app.title() == "evren"
+    finally:
+        app.destroy()
+
+
+def test_app_views_initialized():
+    """Tüm sekmelerin ve görünümlerin başarıyla yüklendiğini test eder."""
+    app = EvrenApp()
+    try:
+        expected_views = {"chat", "ocr", "transcribe", "rerank", "quota", "settings", "about"}
+        assert set(app.views.keys()) == expected_views
+
+        # Sekmeler arası geçiş testi
+        for view_id in expected_views:
+            app.show_view(view_id)
+            assert app.active_tab == view_id
+    finally:
+        app.destroy()
+
+
+def test_theme_colors():
+    """Koyu ve açık tema renk paletlerini doğrular."""
+    assert "dark" in THEME_COLORS
+    assert "light" in THEME_COLORS
+    for mode in ("dark", "light"):
+        colors = THEME_COLORS[mode]
+        assert "bg_primary" in colors
+        assert "text_primary" in colors
+        assert "accent" in colors
+        assert "success" in colors
+        assert "danger" in colors
+
+
+def test_turkce_hata_mesajlari():
+    """Teknik istisnaların Türkçe kullanıcı dostu mesajlara dönüştüğünü doğrular."""
+    e401 = EvrenAPIError(401, {"message": "Invalid key"}, {})
+    msg401 = turkce_hata_mesaji(e401)
+    assert "Kimlik doğrulama başarısız" in msg401
+    assert "401" in msg401
+
+    e402 = EvrenAPIError(402, {"message": "Out of credit"}, {})
+    assert "Yetersiz Kredi" in turkce_hata_mesaji(e402)
+
+    e403 = EvrenAPIError(403, {"message": "Forbidden"}, {})
+    assert "Erişim Engellendi" in turkce_hata_mesaji(e403)
+
+    e429 = EvrenAPIError(429, {"message": "Too many requests"}, {})
+    assert "Hız/Kota Sınırı Aşıldı" in turkce_hata_mesaji(e429)
+
+    e503 = EvrenAPIError(503, {}, {})
+    assert "Sunucu Hizmet Veremiyor" in turkce_hata_mesaji(e503)
+
+    conn_err = httpx.ConnectError("Connection refused")
+    assert "Sunucuya bağlanılamadı" in turkce_hata_mesaji(conn_err)
+
+    timeout_err = httpx.TimeoutException("Timed out")
+    assert "İstek zaman aşımına uğradı" in turkce_hata_mesaji(timeout_err)
+
+
+def test_ensure_app_icon():
+    """Uygulama simgesinin başarıyla oluşturulduğunu doğrular."""
+    icon_path = ensure_app_icon()
+    assert icon_path.exists()
+    assert icon_path.stat().st_size > 0
+
+
+def test_service_settings_update(tmp_path, monkeypatch):
+    """Ayarların güncellenip kaydedildiğini test eder."""
+    config_file = tmp_path / "config.yaml"
+    monkeypatch.chdir(tmp_path)
+    service = EvrenService()
+    service.update_settings("https://custom.evren.local/v1", "custom-model-1", 99.0)
+    assert service.base_url == "https://custom.evren.local/v1"
+    assert service.default_model == "custom-model-1"
+    assert service.timeout == 99.0

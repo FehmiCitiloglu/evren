@@ -62,6 +62,15 @@ def get_api_key(provider: str, config: dict, *, base_url: str | None = None) -> 
         return ""
 
 
+def set_api_key(provider: str, config: dict, key: str, *, base_url: str | None = None) -> None:
+    """Save an API key directly into the OS credential store."""
+    clean_key = _usable(key)
+    if not clean_key or any(char.isspace() for char in clean_key):
+        raise ValueError("Geçerli bir API anahtarı girin; boş değer, şablon veya boşluk kabul edilmez.")
+    env, service, account = _identity(provider, config, base_url)
+    _backend().set_password(service, account, clean_key)
+
+
 def ensure_api_key(provider: str, config: dict, *, base_url: str | None = None,
                    replace: bool = False) -> str:
     """Prompt only in a terminal, save to the OS store, and return the key."""

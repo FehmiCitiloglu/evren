@@ -156,6 +156,7 @@ def build_parser(prog: str = "evren") -> argparse.ArgumentParser:
     docs = command("api-docs", "Çevrimdışı resmî API sözleşmesi ve uç nokta listesi")
     docs.add_argument("--schema", action="store_true", help="Tam OpenAPI şeması")
     docs.add_argument("--path", help="Bir uç noktanın sözleşmesi")
+    command("gui", "evren masaüstü uygulamasını başlat")
     return parser
 
 
@@ -351,12 +352,15 @@ async def run(argv: Sequence[str], *, api_key: str | None = None, base_url: str 
         if args.command == "login":
             ensure_api_key(provider, config, base_url=url, replace=True)
             return 0
+        if args.command == "gui":
+            from evren_agent.ui.app import main as gui_main
+            return gui_main()
         if args.command is None:
             if sys.stdin.isatty():
                 ensure_api_key(provider, config, base_url=url)
             build_parser().print_help()
             return 0
-        needs_key = args.command not in ("health", "api-docs")
+        needs_key = args.command not in ("health", "api-docs", "gui")
         if args.command == "request" and args.path in ("/healthz", "/readyz"):
             needs_key = False
         if needs_key:
