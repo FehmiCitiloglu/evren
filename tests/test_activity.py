@@ -229,3 +229,54 @@ def test_mouse_scroll_reaches_long_single_line_and_resize():
     assert len(resized) < len(rows)
     assert view.cursor == len(resized) - 1
     assert 'TAIL' in resized[view.cursor][1]
+
+
+@pytest.mark.asyncio
+async def test_activity_vim_navigation_shortcuts():
+    log = ActivityLog()
+    for i in range(15):
+        log.thought(f"Thought {i}")
+    with create_pipe_input() as pipe:
+        view = ActivityView(log, input=pipe, output=DummyOutput())
+        task = asyncio.create_task(view.run())
+        await wait_for(lambda: view.app.is_running)
+        assert view.cursor == 0
+
+        # j moves down
+        pipe.send_text("j")
+        await wait_for(lambda: view.cursor == 1)
+
+        # k moves up
+        pipe.send_text("k")
+        await wait_for(lambda: view.cursor == 0)
+
+        # G moves to bottom
+        pipe.send_text("G")
+        last = len(view._owners) - 1
+        await wait_for(lambda: view.cursor == last)
+
+        # gg moves to top
+        pipe.send_text("gg")
+        await wait_for(lambda: view.cursor == 0)
+
+        # d moves down 10
+        pipe.send_text("d")
+        await wait_for(lambda: view.cursor == 10)
+
+        # u moves up 10
+        pipe.send_text("u")
+        await wait_for(lambda: view.cursor == 0)
+
+        # o toggles expansion
+        pipe.send_text("j")
+        await wait_for(lambda: view.cursor == 1)
+        pipe.send_text("o")
+        await wait_for(lambda: log.entries[0].expanded)
+        pipe.send_text("o")
+        await wait_for(lambda: not log.entries[0].expanded)
+
+        # q exits
+        pipe.send_text("q")
+        await asyncio.wait_for(task, 2)
+        assert not view.app.is_running
+

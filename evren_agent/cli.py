@@ -18,6 +18,13 @@ from rich.text import Text
 from evren_agent.core.agent import Agent
 from evren_agent.credentials import ensure_api_key
 from evren_agent.activity import ActivityLog, ActivityView
+from evren_agent.paste import (
+    create_paste_badge,
+    delete_badge_on_backspace,
+    delete_badge_on_delete,
+    expand_pastes,
+    PasteBadgeProcessor,
+)
 
 try:
     from prompt_toolkit import PromptSession
@@ -27,6 +34,7 @@ try:
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.application import in_terminal
     from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.keys import Keys
     from prompt_toolkit.mouse_events import MouseEventType
     HAVE_PROMPT_TOOLKIT = True
 except ImportError:
@@ -915,6 +923,7 @@ async def run_repl(agent: Agent) -> None:
 
     activity = ActivityLog()
     interactive_activity = HAVE_PROMPT_TOOLKIT and console.is_terminal and sys.stdin.isatty()
+    paste_map: dict[str, str] = {}
 
     async def show_details():
         if not activity.entries:
@@ -942,6 +951,32 @@ async def run_repl(agent: Agent) -> None:
             else:
                 return NotImplemented
 
+        @bindings.add(Keys.BracketedPaste)
+        def handle_bracketed_paste(event):
+            badge, is_badge = create_paste_badge(event.data, paste_map)
+            if is_badge:
+                paste_map[badge] = event.data.replace("\r\n", "\n").replace("\r", "\n")
+                event.current_buffer.insert_text(badge)
+            else:
+                event.current_buffer.insert_text(badge)
+
+        @bindings.add("backspace")
+        @bindings.add("c-h")
+        def handle_backspace(event):
+            buf = event.current_buffer
+            if buf.selection_state:
+                buf.cut_selection()
+            elif not delete_badge_on_backspace(buf):
+                buf.delete_before_cursor(count=1)
+
+        @bindings.add("delete")
+        def handle_delete(event):
+            buf = event.current_buffer
+            if buf.selection_state:
+                buf.cut_selection()
+            elif not delete_badge_on_delete(buf):
+                buf.delete(count=1)
+
         def activity_toolbar():
             if activity.entries:
                 return [("", "▶ " + activity.summary + " · Ctrl+O / click: details", click_details)]
@@ -957,6 +992,7 @@ async def run_repl(agent: Agent) -> None:
                 key_bindings=bindings,
                 bottom_toolbar=activity_toolbar if interactive_activity else None,
                 mouse_support=interactive_activity,
+                input_processors=[PasteBadgeProcessor()] if HAVE_PROMPT_TOOLKIT else None,
             )
         except Exception:
             session = None
@@ -975,6 +1011,8 @@ async def run_repl(agent: Agent) -> None:
             if not user_input:
                 continue
 
+            user_input = expand_pastes(user_input, paste_map)
+
             if user_input.startswith("!"):
                 await handle_shell_command(agent, user_input[1:].strip())
                 continue
@@ -986,6 +1024,7 @@ async def run_repl(agent: Agent) -> None:
                 keep_going = await handle_slash_command(agent, user_input)
                 if user_input.split()[0].lower() == "/clear":
                     activity.entries.clear()
+                    paste_map.clear()
                 if not keep_going:
                     console.print("[cyan]Goodbye![/cyan]")
                     break

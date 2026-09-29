@@ -97,22 +97,45 @@ class ActivityView:
 
         @bindings.add("enter")
         @bindings.add(" ")
+        @bindings.add("o")
         def toggle_entry(event):
             self.toggle_selected()
 
+        @bindings.add("g", "g")
+        def move_top(event):
+            self.fragments()
+            self.cursor = 0
+
+        @bindings.add("G")
+        def move_bottom(event):
+            self.fragments()
+            self.cursor = max(0, len(self._owners) - 1)
+
         @bindings.add("up")
         @bindings.add("down")
+        @bindings.add("k")
+        @bindings.add("j")
         @bindings.add("pageup")
         @bindings.add("pagedown")
+        @bindings.add("c-u")
+        @bindings.add("u")
+        @bindings.add("c-d")
+        @bindings.add("d")
         @bindings.add("home")
         @bindings.add("end")
         def move(event):
             key = event.key_sequence[0].key
             self.fragments()
             last = max(0, len(self._owners) - 1)
-            delta = {"up": -1, "down": 1, "pageup": -10, "pagedown": 10}.get(key, 0)
+            delta = {
+                "up": -1, "k": -1,
+                "down": 1, "j": 1,
+                "pageup": -10, "u": -10, "c-u": -10,
+                "pagedown": 10, "d": 10, "c-d": 10,
+            }.get(key, 0)
             self.cursor = 0 if key == "home" else last if key == "end" else max(0, min(last, self.cursor + delta))
 
+        @bindings.add("q")
         @bindings.add("escape")
         def close(event):
             if live:
@@ -134,8 +157,8 @@ class ActivityView:
             height=(lambda: 12 if self.expanded else 1) if live else None,
         )
         footer = Window(FormattedTextControl(
-            "Ctrl+O: details · ↑↓/PgUp/PgDn: scroll · Enter/click: fold · "
-            + ("Esc: collapse · Ctrl+C: exit" if live else "Esc/Ctrl+O: back")
+            "Ctrl+O: details · j/k/↑↓: scroll · gg/G: top/bottom · Enter/space/o: fold · "
+            + ("Esc/q: collapse · Ctrl+C: exit" if live else "q/Esc: back")
         ), height=1, style="reverse")
         self.app = Application(
             layout=Layout(HSplit([body, footer])), key_bindings=bindings,
