@@ -30,6 +30,9 @@ from pathlib import Path
 
 def _ensure_tk_environment() -> None:
     """Tcl/Tk kütüphane yollarını sanal ortamlarda (uv, venv, pyenv) otomatik tespit eder."""
+    if sys.platform.startswith("linux"):
+        # Process-local font policy; never change the user's system fonts.
+        os.environ["FONTCONFIG_FILE"] = str(Path(__file__).parent / "assets/fonts-linux.conf")
     for base in [sys.base_prefix, sys.prefix]:
         for ver in ["tcl8.6", "tcl9.0", "tcl8.5"]:
             tcl_cand = Path(base) / "lib" / ver

@@ -125,3 +125,18 @@ def test_worker_callbacks_run_on_gui_thread():
         assert observed == [threading.get_ident()]
     finally:
         app.destroy()
+
+
+def test_linux_font_policy_is_bundled(monkeypatch):
+    import sys
+    import os
+    from pathlib import Path
+    import xml.etree.ElementTree as ET
+    from evren_agent.ui.app import _ensure_tk_environment
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("FONTCONFIG_FILE", "")
+    _ensure_tk_environment()
+    policy = Path(os.environ["FONTCONFIG_FILE"])
+    assert policy.is_file()
+    assert ET.parse(policy).find("selectfont/rejectfont/pattern/patelt[@name='color']/bool").text == "true"
