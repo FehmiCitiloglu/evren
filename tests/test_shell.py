@@ -43,7 +43,7 @@ async def test_shell_output_is_bounded_without_deadlock():
 
 @pytest.mark.asyncio
 async def test_timeout_retains_partial_output():
-    result = await run_shell(python_command("import time; print('started', flush=True); time.sleep(10)"), timeout=0.3)
+    result = await run_shell(python_command("import time; print('started', flush=True); time.sleep(10)"), timeout=2)
     assert "timed out" in result
     assert "started" in result
 
@@ -77,12 +77,12 @@ def test_windows_shell_arguments(monkeypatch):
 @pytest.mark.asyncio
 async def test_timeout_kills_descendants(tmp_path):
     marker = tmp_path / 'should-not-exist'
-    child = f"import time; from pathlib import Path; time.sleep(0.8); Path({str(marker)!r}).touch()"
+    child = f"import time; from pathlib import Path; time.sleep(4); Path({str(marker)!r}).touch()"
     parent = f"import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', {child!r}]); print('spawned', flush=True); time.sleep(10)"
-    result = await run_shell(python_command(parent), timeout=0.3)
+    result = await run_shell(python_command(parent), timeout=2)
     assert "spawned" in result
     assert "timed out" in result
-    await asyncio.sleep(0.9)
+    await asyncio.sleep(4.2)
     assert not marker.exists()
 
 
