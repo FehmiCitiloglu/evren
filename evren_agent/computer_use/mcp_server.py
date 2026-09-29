@@ -23,7 +23,7 @@ from evren_agent.mcp.protocol import (
 
 logger = logging.getLogger(__name__)
 
-SERVER_VERSION = "0.2.3"
+SERVER_VERSION = "0.2.4"
 SERVER_NAME = "evren-computer-use"
 PROTOCOL_VERSION = "2024-11-05"
 

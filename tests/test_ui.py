@@ -25,7 +25,7 @@ def test_app_views_initialized():
     """Tüm sekmelerin ve görünümlerin başarıyla yüklendiğini test eder."""
     app = EvrenApp()
     try:
-        expected_views = {"projects", "chat", "ocr", "transcribe", "rerank", "quota", "settings", "about"}
+        expected_views = {"projects", "chat", "mcp", "ocr", "transcribe", "rerank", "quota", "settings", "about"}
         assert set(app.views.keys()) == expected_views
 
 

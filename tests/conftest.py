@@ -12,6 +12,7 @@ def credential_store(monkeypatch):
     backend = SimpleNamespace(
         get_password=lambda service, account: values.get((service, account)),
         set_password=lambda service, account, value: values.__setitem__((service, account), value),
+        delete_password=lambda service, account: values.pop((service, account), None),
         values=values,
         native_lookup=credentials._backend,
     )

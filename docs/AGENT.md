@@ -224,6 +224,61 @@ You > /mcp rm git
 
 ---
 
+## 🖥️ Desktop MCP Manager & Per-Chat Architecture
+
+EVREN Masaüstü uygulaması (`evren gui`), CLI'daki MCP altyapısını görsel bir yönetim merkezine ve oturum bazlı (per-chat) araç izolasyonuna kavuşturur.
+
+### 1. Üç Ayrı Durum Modeli (Lifecycle States)
+Sistemde her MCP sunucusu için 3 bağımsız durum katmanı bulunur:
+- **Yapılandırılmış (Configured):** Sunucu tanımı `config.yaml` içinde kayıtlıdır.
+- **Bağlı (Connected):** Sunucu süreci (subprocess) veya HTTP/SSE bağlantısı aktif ve JSON-RPC el sıkışması tamamlanmıştır.
+- **Mevcut Sohbet İçin Etkin (Enabled for current chat):** Sunucunun araçları yalnızca o anki sohbet oturumunun (`ChatSession`) dil modeline iletilir. Bir sunucuyu mevcut sohbetten kaldırmak (`×`), sunucunun bağlantısını koparmaz veya genel konfigürasyonundan silmez.
+
+### 2. Kalıcı Asenkron Çalışma Zamanı (`AsyncRuntime`)
+Masaüstü Tkinter ana iş parçacığını dondurmamak ve `MCPClient` bağlantılarını geçici döngülere (ephemeral event loops) taşımamak için arka planda uzun ömürlü bir daemon iş parçacığı (`AsyncRuntime`) çalışır:
+- Tek ve kalıcı bir `asyncio` event loop barındırır.
+- MCP subprocess'leri, HTTP bağlantıları ve otonom `Agent` akış döngüleri bu runtime içinde yaşar.
+- Arayüz (Tkinter) yalnızca `root.after()` veya event dispatch ile güvenli şekilde bilgilendirilir. Uygulama kapanırken `runtime.shutdown()` ile tüm alt süreçler zarifçe (graceful termination: SIGTERM -> timeout -> SIGKILL) sonlandırılır.
+
+### 3. Oturum İzolasyonu (`ChatSession` & `SessionToolFilter`)
+- Her sohbet bir `ChatSession` örneğidir ve kendi `active_mcp_servers` kümesine sahiptir.
+- Global `ToolRegistry` körü körüne mutasyona uğramaz. `SessionToolFilter` katmanı, modele yalnızca:
+  1. Yerleşik araçları (builtin),
+  2. Aktif eklenti araçlarını (plugins),
+  3. O sohbet oturumu için seçilmiş MCP sunucularının araçlarını sunar.
+- Model izin verilmeyen bir MCP aracını çağırmaya çalışırsa `SessionToolFilter.execute()` tarafından güvenli şekilde engellenir.
+
+### 4. Bağlantı Havuzu & Referans Sayımı (`MCPConnectionManager`)
+- MCP süreçleri her mesaj gönderildiğinde yeniden başlatılmaz.
+- `MCPConnectionManager` havuzunda çalışan bağlantılar referans sayımı (`acquire(session_id)` / `release(session_id)`) ile yönetilir.
+- Birden fazla sohbet aynı sunucuyu paylaştığında tek bir canlı süreç üzerinden hizmet verilir.
+
+### 5. Güvenli Secret ve Keyring Yönetimi
+- Hassas API tokenları (örn. `GITHUB_TOKEN`, Bearer anahtarları) `config.yaml` içine düz metin olarak yazılmaz.
+- İşletim sistemi kasasında güvenle saklanır:
+  - macOS: Keychain
+  - Windows: Credential Manager
+  - Linux: Secret Service / KWallet
+- `config.yaml` içinde referans URI tutulur (`keyring://mcp/<server>/<key>`).
+- Arayüzde `••••••••` şeklinde maskelenir ve loglarda/araç çıktılarında `redact_secrets()` ile sansürlenir.
+
+### 6. Otonom Araç Akışı & Katlanabilir Kartlar (`ToolActivityBubble`)
+- Desktop Chat doğrudan EVREN API çağrısı yerine `EvrenService.chat_agent_stream_async()` köprüsünü kullanır.
+- Dil modeli araç çağırdığında `tool_call_started`, `tool_call_result`, `tool_call_error` gibi türlenmiş `AgentEvent` olayları fırlatılır.
+- Sohbet akışında katlanabilir `ToolActivityBubble` kartları üretilir; parametreler, çalışma süresi ve önizleme kullanıcıya açık ve anlaşılır şekilde sunulur.
+
+### 7. Sorun Giderme (Troubleshooting)
+- **Süreç Başlatılamadı (Process failed / FileNotFoundError):**
+  Komutun (örn. `npx`, `uvx`) sistem PATH'inde olduğundan ve çalışma dizininin erişilebilir olduğundan emin olun. Gerekirse tam yolu (örn. `/usr/local/bin/npx`) belirtin.
+- **Bağlantı Zaman Aşımı (Timeout):**
+  Sunucu başlatma betiği uzun sürüyorsa veya ilk indirmeyi yapıyorsa zaman aşımı sürebilir. `MCPView` içindeki **Sına** butonunu kullanarak detaylı hata ve süre analizini görüntüleyin.
+- **Taşıma Hataları (Transport error / BrokenPipe):**
+  Uzak HTTP/SSE sunucusunun çalıştığını, URL'in doğru olduğunu ve gerekli header/token bilgilerinin girildiğini kontrol edin.
+- **Kasa Erişimi (Keyring unavailable):**
+  Başsız (headless) veya kilitli anahtarlık durumlarında oturum boyunca geçici güvenli bellek saklama alanı devreye girer.
+
+---
+
 ## 🧩 Architecture Overview
 
 ```

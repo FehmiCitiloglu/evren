@@ -81,7 +81,7 @@ class EvrenAPI:
         await self._client.aclose()
 
     def _headers(self, path: str, idempotency_key: str | None = None) -> dict[str, str]:
-        headers = {"User-Agent": "EvrenCLI/0.2.3"}
+        headers = {"User-Agent": "EvrenCLI/0.2.4"}
 
         if path.startswith("/v1/"):
             if not self.api_key:

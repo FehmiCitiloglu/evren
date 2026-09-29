@@ -71,13 +71,15 @@ def get_mcp_servers_from_config(config_path: Optional[str] = None) -> Dict[str, 
 
 def add_mcp_server_to_config(
     name: str,
-    server_config: Dict[str, Any],
+    server_config: Any,
     config_path: Optional[str] = None,
 ) -> Path:
     """Add or update an MCP server configuration in config.yaml."""
     cfg = load_config(config_path)
     if "mcp_servers" not in cfg or not isinstance(cfg["mcp_servers"], dict):
         cfg["mcp_servers"] = {}
+    if hasattr(server_config, "to_dict") and callable(server_config.to_dict):
+        server_config = server_config.to_dict()
     cfg["mcp_servers"][name] = server_config
     return save_config(cfg, config_path)
 

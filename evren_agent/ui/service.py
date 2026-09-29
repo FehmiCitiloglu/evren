@@ -17,8 +17,26 @@ from typing import Any, Callable, Dict, List, Optional
 import httpx
 
 from evren_agent.api.client import DEFAULT_BASE_URL, EvrenAPI, EvrenAPIError, media_data_url
-from evren_agent.config import load_config, save_config
+from evren_agent.config import (
+    add_mcp_server_to_config,
+    get_mcp_servers_from_config,
+    load_config,
+    remove_mcp_server_from_config,
+    save_config,
+)
+from evren_agent.core.agent import Agent
+from evren_agent.core.events import AgentEvent, AgentEventType
+from evren_agent.core.runtime import AsyncRuntime
+from evren_agent.core.session import ChatSession, SessionToolFilter
 from evren_agent.credentials import get_api_key, set_api_key
+from evren_agent.mcp.connection import MCPConnectionManager
+from evren_agent.mcp.models import (
+    MCPLogEntry,
+    MCPServerConfig,
+    MCPStatus,
+    MCPTestResult,
+    store_mcp_secret,
+)
 from evren_agent.projects.service import ProjectService
 
 
@@ -92,6 +110,18 @@ class EvrenService:
         if self.config_path:
             db_path = self.config_path.parent / "projects.db"
         self.projects = ProjectService(db_path=db_path)
+
+        # Core runtime, MCP pool & session managers
+        self.runtime = AsyncRuntime.get_instance()
+        self.mcp_manager = MCPConnectionManager()
+        self.mcp_manager.load_from_config(self.config.get("mcp_servers", {}))
+        self.session_tool_filter = SessionToolFilter(self.mcp_manager.tool_registry, self.mcp_manager)
+        self.sessions: Dict[str, ChatSession] = {}
+        self.agent: Optional[Agent] = None
+        self._mcp_listeners: List[Callable[[], None]] = []
+
+        # Connect autostart servers in background
+        self.runtime.submit(self.mcp_manager.autostart_servers())
 
 
     def get_key(self) -> str:
@@ -433,3 +463,385 @@ class EvrenService:
                 self._dispatch(on_error, turkce_hata_mesaji(e))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    # --- MCP & Session Management ---
+
+    def add_mcp_listener(self, callback: Callable[[], None]) -> None:
+        self._mcp_listeners.append(callback)
+
+    def _notify_mcp_listeners(self) -> None:
+        for cb in self._mcp_listeners:
+            try:
+                self._dispatch(cb)
+            except Exception:
+                pass
+
+    def get_agent(self) -> Agent:
+        """Returns the shared core Agent instance integrated with MCP tool registry."""
+        if self.agent is None:
+            self.agent = Agent(config=self.config, config_path=str(self.config_path) if self.config_path else None)
+            self.agent.tools = self.mcp_manager.tool_registry
+            self.session_tool_filter.tool_registry = self.mcp_manager.tool_registry
+        return self.agent
+
+    def get_or_create_session(self, session_id: Optional[str] = None) -> ChatSession:
+        """Retrieve existing chat session or create a new one with configured defaults."""
+        if session_id and session_id in self.sessions:
+            return self.sessions[session_id]
+
+        default_mcps: Set[str] = set()
+        for name, conn in self.mcp_manager.connections.items():
+            if conn.config.default_for_chat and conn.config.enabled:
+                default_mcps.add(name)
+
+        new_session = ChatSession(
+            session_id=session_id,
+            model=self.default_model,
+            active_mcp_servers=default_mcps,
+        )
+        self.sessions[new_session.session_id] = new_session
+        return new_session
+
+    def set_session_mcp(self, session_id: str, server_name: str, enabled: bool) -> None:
+        """Enable or disable an MCP server strictly for the specified chat session."""
+        session = self.get_or_create_session(session_id)
+        if enabled:
+            session.enable_mcp(server_name)
+            self.runtime.submit(self.mcp_manager.acquire_for_session(session_id, server_name))
+        else:
+            session.disable_mcp(server_name)
+            self.runtime.submit(self.mcp_manager.release_for_session(session_id, server_name))
+        self._notify_mcp_listeners()
+
+    def get_session_mcps(self, session_id: str) -> List[str]:
+        session = self.get_or_create_session(session_id)
+        return list(session.active_mcp_servers)
+
+    def get_mcp_servers(self) -> List[Dict[str, Any]]:
+        """Return structured status of all configured MCP servers."""
+        return self.mcp_manager.list_status()
+
+    def connect_mcp_async(
+        self,
+        name: str,
+        on_success: Optional[Callable[[], None]] = None,
+        on_error: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        async def run():
+            await self.mcp_manager.connect_server(name)
+
+        def _done(_):
+            self._notify_mcp_listeners()
+            if on_success:
+                self._dispatch(on_success)
+
+        def _err(e: Exception):
+            self._notify_mcp_listeners()
+            if on_error:
+                self._dispatch(on_error, str(e))
+
+        self.runtime.submit(run(), on_done=_done, on_error=_err)
+
+    def disconnect_mcp_async(
+        self,
+        name: str,
+        force: bool = True,
+        on_success: Optional[Callable[[], None]] = None,
+        on_error: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        async def run():
+            await self.mcp_manager.disconnect_server(name, force=force)
+
+        def _done(_):
+            self._notify_mcp_listeners()
+            if on_success:
+                self._dispatch(on_success)
+
+        def _err(e: Exception):
+            self._notify_mcp_listeners()
+            if on_error:
+                self._dispatch(on_error, str(e))
+
+        self.runtime.submit(run(), on_done=_done, on_error=_err)
+
+    def restart_mcp_async(
+        self,
+        name: str,
+        on_success: Optional[Callable[[], None]] = None,
+        on_error: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        async def run():
+            await self.mcp_manager.restart_server(name)
+
+        def _done(_):
+            self._notify_mcp_listeners()
+            if on_success:
+                self._dispatch(on_success)
+
+        def _err(e: Exception):
+            self._notify_mcp_listeners()
+            if on_error:
+                self._dispatch(on_error, str(e))
+
+        self.runtime.submit(run(), on_done=_done, on_error=_err)
+
+    def test_mcp_async(
+        self,
+        name: str,
+        temp_config: Optional[MCPServerConfig] = None,
+        on_success: Optional[Callable[[MCPTestResult], None]] = None,
+        on_error: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        async def run() -> MCPTestResult:
+            return await self.mcp_manager.test_server(name, temp_config=temp_config)
+
+        def _done(res: MCPTestResult):
+            if on_success:
+                self._dispatch(on_success, res)
+
+        def _err(e: Exception):
+            if on_error:
+                self._dispatch(on_error, str(e))
+
+        self.runtime.submit(run(), on_done=_done, on_error=_err)
+
+    def add_mcp_server_async(
+        self,
+        config: MCPServerConfig,
+        connect_now: bool = False,
+        on_success: Optional[Callable[[], None]] = None,
+        on_error: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        async def run():
+            # 1. Persist to config.yaml
+            add_mcp_server_to_config(config.name, config.to_dict(), str(self.config_path) if self.config_path else None)
+            self.config = load_config(self.config_path)
+            # 2. Add to runtime pool
+            await self.mcp_manager.add_server(config, connect_now=connect_now)
+
+        def _done(_):
+            self._notify_mcp_listeners()
+            if on_success:
+                self._dispatch(on_success)
+
+        def _err(e: Exception):
+            self._notify_mcp_listeners()
+            if on_error:
+                self._dispatch(on_error, str(e))
+
+        self.runtime.submit(run(), on_done=_done, on_error=_err)
+
+    def update_mcp_server_async(
+        self,
+        name: str,
+        new_config: MCPServerConfig,
+        on_success: Optional[Callable[[], None]] = None,
+        on_error: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        async def run():
+            # 1. Update config.yaml atomically
+            cfg = load_config(self.config_path)
+            servers = cfg.setdefault("mcp_servers", {})
+            if name in servers and name != new_config.name:
+                del servers[name]
+            servers[new_config.name] = new_config.to_dict()
+            save_config(cfg, self.config_path)
+            self.config = cfg
+
+            # 2. Update runtime connection manager
+            await self.mcp_manager.update_server(name, new_config)
+
+        def _done(_):
+            self._notify_mcp_listeners()
+            if on_success:
+                self._dispatch(on_success)
+
+        def _err(e: Exception):
+            self._notify_mcp_listeners()
+            if on_error:
+                self._dispatch(on_error, str(e))
+
+        self.runtime.submit(run(), on_done=_done, on_error=_err)
+
+    def remove_mcp_server_async(
+        self,
+        name: str,
+        on_success: Optional[Callable[[], None]] = None,
+        on_error: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        async def run() -> bool:
+            # 1. Remove from config.yaml
+            remove_mcp_server_from_config(name, str(self.config_path) if self.config_path else None)
+            self.config = load_config(self.config_path)
+            # 2. Remove from runtime manager
+            ok = await self.mcp_manager.remove_server(name)
+            # 3. Clean up from all active chat sessions
+            for s in self.sessions.values():
+                s.disable_mcp(name)
+            return ok
+
+        def _done(_):
+            self._notify_mcp_listeners()
+            if on_success:
+                self._dispatch(on_success)
+
+        def _err(e: Exception):
+            self._notify_mcp_listeners()
+            if on_error:
+                self._dispatch(on_error, str(e))
+
+        self.runtime.submit(run(), on_done=_done, on_error=_err)
+
+    def get_mcp_tools_async(
+        self,
+        name: str,
+        on_success: Callable[[List[Dict[str, Any]]], None],
+        on_error: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        async def run() -> List[Dict[str, Any]]:
+            conn = self.mcp_manager.get_connection(name)
+            if not conn:
+                raise KeyError(f"MCP server '{name}' not found.")
+            tools = await conn.refresh_tools() if conn.status == MCPStatus.CONNECTED else conn.cached_tools
+            return [
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "inputSchema": t.inputSchema,
+                    "server": name,
+                }
+                for t in tools
+            ]
+
+        def _done(tools):
+            self._dispatch(on_success, tools)
+
+        def _err(e: Exception):
+            if on_error:
+                self._dispatch(on_error, str(e))
+
+        self.runtime.submit(run(), on_done=_done, on_error=_err)
+
+    def get_mcp_logs(self, name: str) -> List[MCPLogEntry]:
+        conn = self.mcp_manager.get_connection(name)
+        if not conn:
+            return []
+        return list(conn.logs)
+
+    def duplicate_mcp_server(self, name: str, new_name: str) -> MCPServerConfig:
+        cfg = self.mcp_manager.duplicate_server(name, new_name)
+        add_mcp_server_to_config(new_name, cfg.to_dict(), str(self.config_path) if self.config_path else None)
+        self.config = load_config(self.config_path)
+        self._notify_mcp_listeners()
+        return cfg
+
+    def export_mcp_configs(self) -> Dict[str, Any]:
+        """Export configured MCP servers with secret values redacted as '<SECRET_REQUIRED>'."""
+        servers = get_mcp_servers_from_config(self.config_path)
+        exported = {}
+        for name, conf in servers.items():
+            c = dict(conf)
+            if "secret_env" in c and isinstance(c["secret_env"], dict):
+                c["secret_env"] = {k: "<SECRET_REQUIRED>" for k in c["secret_env"]}
+            exported[name] = c
+        return exported
+
+    def import_mcp_configs(self, configs: Dict[str, Any]) -> int:
+        """Import MCP server configurations."""
+        count = 0
+        for name, conf in configs.items():
+            if isinstance(conf, dict):
+                cfg = MCPServerConfig.from_dict(name, conf)
+                add_mcp_server_to_config(name, cfg.to_dict(), str(self.config_path) if self.config_path else None)
+                count += 1
+        self.config = load_config(self.config_path)
+        self.mcp_manager.load_from_config(self.config.get("mcp_servers", {}))
+        self._notify_mcp_listeners()
+        return count
+
+    # --- Desktop Chat Agent Bridge ---
+
+    def chat_agent_stream_async(
+        self,
+        session_id: str,
+        prompt: str,
+        image_path: Optional[str] = None,
+        on_event: Optional[Callable[[AgentEvent], None]] = None,
+        on_done: Optional[Callable[[str], None]] = None,
+        on_error: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        """
+        Desktop Chat bridge executing the real Agent loop with streaming events and session-scoped MCP tools.
+        """
+        cancel_event = threading.Event()
+        self._active_stream_cancel = cancel_event
+
+        async def run():
+            session = self.get_or_create_session(session_id)
+            agent = self.get_agent()
+            await agent.initialize()
+
+            # Acquire/connect active MCPs for this session
+            for s_name in list(session.active_mcp_servers):
+                try:
+                    await self.mcp_manager.acquire_for_session(session.session_id, s_name)
+                    if on_event:
+                        self._dispatch(
+                            on_event,
+                            AgentEvent(
+                                type=AgentEventType.MCP_CONNECTED,
+                                session_id=session.session_id,
+                                server_name=s_name,
+                                content=f"MCP '{s_name}' connected.",
+                            ),
+                        )
+                except Exception as ex:
+                    logger.warning("Failed connecting MCP '%s' for session: %s", s_name, ex)
+                    if on_event:
+                        self._dispatch(
+                            on_event,
+                            AgentEvent(
+                                type=AgentEventType.MCP_ERROR,
+                                session_id=session.session_id,
+                                server_name=s_name,
+                                content=str(ex),
+                            ),
+                        )
+
+            # Vision / Multimodal augmentation if attached image
+            augmented_prompt = prompt
+            if image_path and os.path.exists(image_path):
+                augmented_prompt = f"[User attached image at: {image_path}]\n{prompt}"
+
+            final_text = ""
+            async for evt in agent.run_stream(
+                prompt=augmented_prompt,
+                session=session,
+                session_tool_filter=self.session_tool_filter,
+                cancel_event=cancel_event,
+            ):
+                if on_event:
+                    self._dispatch(on_event, evt)
+                if evt.type == AgentEventType.DONE:
+                    final_text = evt.content or ""
+
+            if on_done:
+                self._dispatch(on_done, final_text)
+
+        def _err(e: Exception):
+            if on_error:
+                self._dispatch(on_error, str(e))
+            elif on_done:
+                self._dispatch(on_done, f"Hata: {e}")
+
+        self.runtime.submit(run(), on_error=_err)
+
+    def shutdown(self) -> None:
+        """Cleanly shutdown runtime and all MCP child processes."""
+        self.cancel_active_stream()
+        try:
+            self.runtime.run_sync(self.mcp_manager.shutdown(), timeout=5.0)
+        except Exception:
+            pass
+        self.runtime.shutdown(wait=True)
+

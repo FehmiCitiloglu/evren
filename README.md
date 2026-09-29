@@ -151,7 +151,31 @@ Grafik ortamda çift tıklayarak çalıştırmak için:
 - 🎙️ **Ses Çözümleme:** MP3, WAV, M4A, OGG ve FLAC ses kayıtlarını metne ve zaman damgalı SRT altyazılara dönüştürme.
 - 🔍 **Yeniden Sıralama (Rerank):** Arama sorguları ve belge listelerini semantik alaka puanlarına göre sıralama.
 - 📊 **Kota ve Durum:** Canlı bakiye ve token kotası sorgulama, sunucu sağlık/hazırlık (`/healthz`, `/readyz`) kontrolleri ve resmi Kullanım Şartları (Terms) metnini okuyup onaylama.
+- 🔌 **Gelişmiş MCP Yöneticisi:** Yerel (`stdio`) ve uzak (`sse`/`streamable_http`) Model Context Protocol sunucularını görsel olarak ekleme, test etme, araç şemalarını inceleme, canlı logları izleme, işletim sistemi kasasında (`keyring`) güvenli token saklama ve her sohbet oturumuna özel bağımsız araç seçimi (per-chat MCP isolation).
 - ⚙️ **Ayarlar:** API taban adresi yapılandırması, API anahtarını işletim sisteminin şifreli kasasında (macOS Keychain, Windows Credential Manager, Linux Secret Service) saklama, açık/koyu tema ve arayüz ölçeklendirme.
+
+### Masaüstü MCP Yöneticisi (Desktop MCP Manager)
+
+EVREN Masaüstü uygulaması, sol menüdeki **🔌 MCP** sekmesi üzerinden tam teşekküllü bir MCP sunucu yönetim merkezi sunar:
+
+1. **Sunucu Ekleme & Düzenleme:**
+   - **Yerel (stdio):** `npx`, `uvx`, `python`, `node` gibi komutlar, argümanlar, çalışma dizini (`cwd`) ve ortam değişkenleri tanımlanabilir.
+   - **Uzak (HTTP/SSE):** Uzak MCP sunucusu URL'si, taşıma protokolü (`sse` / `streamable_http`), özel HTTP başlıkları (headers) ve kimlik doğrulama ayarları.
+2. **İşletim Sistemi Kasasında Güvenli Secret Saklama:**
+   - API tokenları ve gizli ortam değişkenleri düz metin `config.yaml` içine **asla** yazılmaz.
+   - Değerler işletim sisteminin güvenli kasasında saklanır (`keyring://mcp/<sunucu>/<anahtar>`). Arayüzde `••••••••` olarak maskelenir; loglarda ve araç çağrılarında otomatik olarak sansürlenir (redaction).
+3. **Tanılama ve Bağlantı Testi:**
+   - Sunucuyu kaydetmeden önce veya sonra **Sına (Test)** butonuyla JSON-RPC el sıkışması, sunucu sürümü, protokol sürümü, yetenekler (capabilities), gecikme süresi (ms) ve keşfedilen araç listesi tek ekranda doğrulanabilir.
+4. **Araç Gezgini & Canlı Loglar:**
+   - **Araçlar:** Sunucunun sunduğu tüm araçlar, açıklamaları ve parametre şemaları (JSON Schema) incelenebilir.
+   - **Loglar:** Subprocess stdout/stderr akışı ile JSON-RPC hata ve bildirimleri gerçek zamanlı izlenebilir.
+5. **Sohbet Başına MCP Seçimi (Per-Chat Isolation):**
+   - Sohbet ekranının üst araç çubuğundaki **🔌 MCP (X)** butonuna tıklanarak mevcut sohbet oturumuna istenen sunucular eklenip çıkarılabilir.
+   - Giriş alanının üzerinde aktif sunucular rozet (chip) olarak listelenir; `×` ile yalnızca o sohbetten kaldırılır (global konfigürasyon korunur).
+   - Global araç havuzu körü körüne mutasyona uğramaz (`SessionToolFilter`); her sohbet bağımsız bir çalışma oturumu (`ChatSession`) yürütür.
+6. **Katlanabilir Araç Çağrısı Kartları:**
+   - Model bir MCP aracını çağırdığında arayüzde donma olmaz; çağrı durumu (çalışıyor / tamamlandı / hata), çalışma süresi, argümanlar ve önizleme katlanabilir kart içinde gösterilir.
+
 
 ## Sohbet, görsel anlama ve akış
 

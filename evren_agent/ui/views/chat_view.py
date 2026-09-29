@@ -10,15 +10,106 @@ import datetime
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 from PIL import Image
 
+from evren_agent.core.events import AgentEvent, AgentEventType
+from evren_agent.core.session import ChatSession
+from evren_agent.ui.components.tool_card import ToolActivityBubble
 from evren_agent.ui.service import EvrenService
 from evren_agent.ui.theme import THEME_COLORS
+
+
+class MCPChatSelectorDialog(ctk.CTkToplevel):
+    """Mevcut sohbet oturumuna MCP sunucularını ekleme / çıkarma seçim penceresi."""
+
+    def __init__(self, master: Any, service: EvrenService, session: ChatSession, on_changed: Callable[[], None]) -> None:
+        super().__init__(master)
+        self.service = service
+        self.session = session
+        self.on_changed = on_changed
+
+        self.title("Sohbete MCP Ekle / Çıkar")
+        self.geometry("450x460")
+        self.minsize(380, 320)
+        self.grab_set()
+
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.pack(fill="x", padx=16, pady=(16, 8))
+
+        ctk.CTkLabel(
+            header,
+            text="🔌 Sohbet MCP Seçimi",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="#38bdf8",
+        ).pack(anchor="w")
+
+        ctk.CTkLabel(
+            header,
+            text="Etkinleştirilen sunucuların araçları yalnızca bu sohbette modele sunulur.",
+            font=ctk.CTkFont(size=11),
+            text_color=("gray40", "#94a3b8"),
+        ).pack(anchor="w", pady=(2, 0))
+
+        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        scroll.pack(fill="both", expand=True, padx=16, pady=8)
+
+        servers = self.service.get_mcp_servers()
+        if not servers:
+            ctk.CTkLabel(
+                scroll,
+                text="Yapılandırılmış MCP sunucusu bulunamadı.\nSol menüden '🔌 MCP' sekmesine giderek sunucu ekleyebilirsiniz.",
+                font=ctk.CTkFont(size=12),
+                text_color=("gray40", "#94a3b8"),
+                justify="center",
+            ).pack(pady=40)
+        else:
+            for s in servers:
+                name = s.get("name", "")
+                tool_count = s.get("tool_count", 0)
+                status = s.get("status", "disconnected")
+                cmd_or_url = s.get("command_or_url", "-")
+
+                row = ctk.CTkFrame(scroll, fg_color=("gray95", "#161f2e"), corner_radius=8, border_width=1, border_color=("gray85", "#243247"))
+                row.pack(fill="x", pady=4)
+
+                var = tk.BooleanVar(value=self.session.is_mcp_enabled(name))
+
+                def _on_toggle(server_name=name, v=var):
+                    self.service.set_session_mcp(self.session.session_id, server_name, v.get())
+                    self.on_changed()
+
+                chk = ctk.CTkCheckBox(
+                    row,
+                    text=f"{name} ({tool_count} araç)",
+                    variable=var,
+                    font=ctk.CTkFont(size=13, weight="bold"),
+                    command=_on_toggle,
+                )
+                chk.pack(anchor="w", padx=12, pady=(8, 2))
+
+                sub_text = f"Durum: {status} | Hedef: {cmd_or_url}"
+                ctk.CTkLabel(
+                    row,
+                    text=sub_text,
+                    font=ctk.CTkFont(size=10),
+                    text_color=("gray40", "#94a3b8"),
+                ).pack(anchor="w", padx=36, pady=(0, 8))
+
+        close_btn = ctk.CTkButton(
+            self,
+            text="Tamam",
+            width=100,
+            command=self.destroy,
+        )
+        close_btn.pack(pady=12)
 
 
 class ChatMessageBubble(ctk.CTkFrame):
@@ -130,19 +221,23 @@ class ChatView(ctk.CTkFrame):
     def __init__(self, master: Any, service: EvrenService, **kwargs: Any) -> None:
         super().__init__(master, fg_color="transparent", **kwargs)
         self.service = service
+        self.session: ChatSession = self.service.get_or_create_session()
         self.messages: List[Dict[str, Any]] = []
         self.attached_image_path: Optional[str] = None
         self.current_bot_bubble: Optional[ChatMessageBubble] = None
+        self._current_tool_bubble: Optional[ToolActivityBubble] = None
         self.is_streaming = False
 
         self._build_ui()
         self._load_models()
+        self.service.add_mcp_listener(self._update_mcp_chips)
+        self._update_mcp_chips()
 
     def _build_ui(self) -> None:
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)  # Mesaj alanı esner
 
-        # 1. ÜST PANEL: Model Seçimi, Parametreler ve Aksiyon Butonları
+        # 1. ÜST PANEL: Model Seçimi, MCP Seçimi, Parametreler ve Aksiyon Butonları
         top_bar = ctk.CTkFrame(self, fg_color=("gray90", "#1e293b"), corner_radius=10)
         top_bar.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 6))
 
@@ -153,11 +248,26 @@ class ChatView(ctk.CTkFrame):
         self.model_combo = ctk.CTkComboBox(
             top_bar,
             values=[self.service.default_model],
-            width=180,
+            width=170,
             command=self._on_model_selected,
         )
         self.model_combo.set(self.service.default_model)
         self.model_combo.pack(side="left", padx=4, pady=10)
+
+        # MCP Seçici Butonu (Current Chat MCP Indicator)
+        self.mcp_btn = ctk.CTkButton(
+            top_bar,
+            text="🔌 MCP (0)",
+            width=100,
+            height=28,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="transparent",
+            border_width=1,
+            text_color="#38bdf8",
+            border_color="#38bdf8",
+            command=self._open_mcp_selector,
+        )
+        self.mcp_btn.pack(side="left", padx=6, pady=10)
 
         # Ayarları Göster / Gizle Butonu
         self.toggle_params_btn = ctk.CTkButton(
@@ -170,7 +280,7 @@ class ChatView(ctk.CTkFrame):
             text_color=("gray20", "gray80"),
             command=self._toggle_params,
         )
-        self.toggle_params_btn.pack(side="left", padx=8, pady=10)
+        self.toggle_params_btn.pack(side="left", padx=4, pady=10)
 
         # Sağ Taraf Butonları: Yeni Sohbet & Dışa Aktar & Temizle
         clear_btn = ctk.CTkButton(
@@ -279,6 +389,10 @@ class ChatView(ctk.CTkFrame):
         # Hoş Geldiniz Mesaj Kartı
         self._add_welcome_card()
 
+        # 3.5. AKTİF MCP ÇİPLERİ (CHIPS) ÇUBUĞU
+        self.chips_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.chips_frame.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 2))
+
         # 4. EKLİ GÖRSEL ÇUBUĞU (Varsa gösterilir)
         self.img_tray = ctk.CTkFrame(self, fg_color=("gray85", "#243044"), corner_radius=8, height=36)
         self.img_tray_lbl = ctk.CTkLabel(
@@ -302,7 +416,7 @@ class ChatView(ctk.CTkFrame):
 
         # 5. ALT GİRDİ PANELİ
         bottom_box = ctk.CTkFrame(self, fg_color=("gray90", "#1e293b"), corner_radius=12)
-        bottom_box.grid(row=3, column=0, sticky="ew", padx=16, pady=(4, 12))
+        bottom_box.grid(row=4, column=0, sticky="ew", padx=16, pady=(4, 12))
         bottom_box.grid_columnconfigure(1, weight=1)
 
         # Görsel Ekle Butonu
@@ -351,7 +465,45 @@ class ChatView(ctk.CTkFrame):
             font=ctk.CTkFont(size=10),
             text_color=("gray50", "gray60"),
         )
-        hint_lbl.grid(row=4, column=0, sticky="w", padx=22, pady=(0, 6))
+        hint_lbl.grid(row=5, column=0, sticky="w", padx=22, pady=(0, 6))
+
+    def _open_mcp_selector(self) -> None:
+        MCPChatSelectorDialog(self, service=self.service, session=self.session, on_changed=self._update_mcp_chips)
+
+    def _remove_mcp_from_session(self, server_name: str) -> None:
+        self.service.set_session_mcp(self.session.session_id, server_name, False)
+        self._update_mcp_chips()
+
+    def _update_mcp_chips(self) -> None:
+        active_mcps = self.service.get_session_mcps(self.session.session_id)
+        self.mcp_btn.configure(text=f"🔌 MCP ({len(active_mcps)})")
+
+        for w in self.chips_frame.winfo_children():
+            w.destroy()
+
+        if not active_mcps:
+            self.chips_frame.grid_remove()
+            return
+
+        self.chips_frame.grid()
+        lbl = ctk.CTkLabel(self.chips_frame, text="Aktif MCP:", font=ctk.CTkFont(size=11, weight="bold"), text_color="#38bdf8")
+        lbl.pack(side="left", padx=(4, 6))
+
+        for s_name in sorted(active_mcps):
+            chip = ctk.CTkButton(
+                self.chips_frame,
+                text=f"{s_name}  ✕",
+                height=22,
+                font=ctk.CTkFont(size=10, weight="bold"),
+                fg_color=("gray85", "#1e293b"),
+                hover_color=("#fee2e2", "#450a0a"),
+                text_color=("gray20", "#e2e8f0"),
+                border_width=1,
+                border_color=("gray70", "#38bdf8"),
+                corner_radius=11,
+                command=lambda sn=s_name: self._remove_mcp_from_session(sn),
+            )
+            chip.pack(side="left", padx=3)
 
     def _add_welcome_card(self) -> None:
         """İlk açılış bilgilendirme kartı."""
@@ -506,24 +658,76 @@ class ChatView(ctk.CTkFrame):
         self.is_streaming = True
         self.send_btn.configure(text="Durdur", fg_color="#ef4444", hover_color="#dc2626")
 
-        # Sistem yönergesi
-        full_messages: List[Dict[str, Any]] = []
-        sys_prompt = self.sys_entry.get().strip()
-        if sys_prompt:
-            full_messages.append({"role": "system", "content": sys_prompt})
-        full_messages.extend(self.messages)
+        # Oturum parametrelerini güncelle
+        self.session.model = model
+        self.session.temperature = float(self.temp_slider.get())
+        self.session.max_tokens = int(self.tokens_slider.get())
+        self.session.system_prompt = self.sys_entry.get().strip()
 
         accumulated_chunks: List[str] = []
+        active_tools_map: Dict[str, ToolActivityBubble] = {}
 
-        def on_delta(delta: str):
-            accumulated_chunks.append(delta)
-            if self.current_bot_bubble:
-                self.current_bot_bubble.update_text("".join(accumulated_chunks))
+        def on_event(evt: AgentEvent):
+            if evt.type == AgentEventType.TEXT_DELTA:
+                if evt.content:
+                    accumulated_chunks.append(evt.content)
+                    if self.current_bot_bubble:
+                        self.current_bot_bubble.update_text("".join(accumulated_chunks))
+                        self._scroll_to_bottom()
+
+            elif evt.type == AgentEventType.REASONING_DELTA:
+                if self.current_bot_bubble and not accumulated_chunks:
+                    self.current_bot_bubble.update_text(f"💭 {evt.content}")
+                    self._scroll_to_bottom()
+
+            elif evt.type == AgentEventType.TOOL_CALL_STARTED:
+                bubble = ToolActivityBubble(
+                    self.chat_scroll,
+                    tool_name=evt.tool_name or "tool",
+                    server_name=evt.server_name,
+                    arguments=evt.arguments,
+                )
+                bubble.pack(fill="x", padx=12, pady=4)
+                active_tools_map[evt.tool_name or ""] = bubble
                 self._scroll_to_bottom()
+
+            elif evt.type == AgentEventType.TOOL_CALL_RESULT:
+                bubble = active_tools_map.get(evt.tool_name or "")
+                if bubble:
+                    bubble.set_result(evt.content or "", duration_ms=evt.duration_ms)
+                self._scroll_to_bottom()
+
+            elif evt.type == AgentEventType.TOOL_CALL_ERROR:
+                bubble = active_tools_map.get(evt.tool_name or "")
+                if bubble:
+                    bubble.set_error(evt.content or "", duration_ms=evt.duration_ms)
+                self._scroll_to_bottom()
+
+            elif evt.type == AgentEventType.MCP_ERROR:
+                err_box = ctk.CTkFrame(self.chat_scroll, fg_color=("#fee2e2", "#450a0a"), corner_radius=6)
+                err_box.pack(fill="x", padx=12, pady=4)
+                ctk.CTkLabel(
+                    err_box,
+                    text=f"⚠️ MCP Bağlantı Hatası [{evt.server_name}]: {evt.content}",
+                    font=ctk.CTkFont(size=11),
+                    text_color="#ef4444",
+                ).pack(padx=8, pady=4)
+                self._scroll_to_bottom()
+
+            elif evt.type == AgentEventType.DONE:
+                if self.current_bot_bubble:
+                    self.current_bot_bubble.update_text(evt.content or "".join(accumulated_chunks) or "(Yanıt tamamlandı)")
+                self.messages.append({"role": "assistant", "content": evt.content or "".join(accumulated_chunks)})
+                self._finish_streaming()
+
+            elif evt.type == AgentEventType.ERROR:
+                if self.current_bot_bubble:
+                    self.current_bot_bubble.update_text(f"⚠️ Hata: {evt.content}")
+                self._finish_streaming()
 
         def on_done(full_text: str):
             if self.current_bot_bubble:
-                self.current_bot_bubble.update_text(full_text or "".join(accumulated_chunks) or "(Yanıt boş)")
+                self.current_bot_bubble.update_text(full_text or "".join(accumulated_chunks) or "(Yanıt tamamlandı)")
             self.messages.append({"role": "assistant", "content": full_text or "".join(accumulated_chunks)})
             self._finish_streaming()
 
@@ -532,13 +736,11 @@ class ChatView(ctk.CTkFrame):
                 self.current_bot_bubble.update_text(f"⚠️ Hata: {err_msg}")
             self._finish_streaming()
 
-        self.service.chat_stream_async(
-            model=model,
-            messages=full_messages,
-            temperature=float(self.temp_slider.get()),
-            max_tokens=int(self.tokens_slider.get()),
-            evren_tools=self.tools_var.get(),
-            on_delta=lambda d: self.after(0, lambda: on_delta(d)),
+        self.service.chat_agent_stream_async(
+            session_id=self.session.session_id,
+            prompt=text,
+            image_path=image_to_send,
+            on_event=lambda evt: self.after(0, lambda: on_event(evt)),
             on_done=lambda t: self.after(0, lambda: on_done(t)),
             on_error=lambda e: self.after(0, lambda: on_error(e)),
         )
@@ -557,11 +759,14 @@ class ChatView(ctk.CTkFrame):
             cevap = messagebox.askyesno("Yeni Sohbet", "Mevcut sohbet temizlenip yeni sohbet başlatılsın mı?")
             if not cevap:
                 return
+        self.session = self.service.get_or_create_session(None)
         self.clear_chat()
+        self._update_mcp_chips()
 
     def clear_chat(self) -> None:
         """Tüm sohbet geçmişini temizler."""
         self.messages.clear()
+        self.session.clear()
         self._remove_attached_image()
         for widget in self.chat_scroll.winfo_children():
             widget.destroy()

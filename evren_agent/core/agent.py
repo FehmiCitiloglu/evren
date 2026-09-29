@@ -23,6 +23,10 @@ from evren_agent.mcp.manager import MCPManager
 from evren_agent.plugins.manager import PluginManager
 from evren_agent.providers.base import BaseProvider
 from evren_agent.providers.registry import ProviderRegistry
+import time
+from evren_agent.core.events import AgentEvent, AgentEventType
+from evren_agent.core.session import ChatSession, SessionToolFilter
+from evren_agent.mcp.models import redact_secrets
 from evren_agent.skills.manager import SkillManager
 
 logger = logging.getLogger(__name__)
@@ -497,6 +501,8 @@ class Agent:
         on_thought: Optional[Callable[[str], None]] = None,
         on_tool_start: Optional[Callable[[str, Dict[str, Any]], None]] = None,
         on_tool_end: Optional[Callable[[str, str], None]] = None,
+        session: Optional[ChatSession] = None,
+        session_tool_filter: Optional[SessionToolFilter] = None,
     ) -> str:
         """Run the agent loop until completion or max_iterations reached."""
         if prompt.lstrip().startswith("!"):
@@ -505,27 +511,39 @@ class Agent:
         if not self._is_initialized:
             await self.initialize()
 
+        msg_target = session.messages if session else self.messages
+
         # Preprocess message with plugins
         processed_prompt = await self.plugins.dispatch_user_message(prompt)
-        self.messages.append(Message(role="user", content=processed_prompt))
+        msg_target.append(Message(role="user", content=processed_prompt))
 
         iteration = 0
         while self.max_iterations is None or iteration < self.max_iterations:
             iteration += 1
 
             # Prepare message chain for LLM
-            system_msg = Message(role="system", content=self._build_full_system_prompt())
-            request_messages = [system_msg] + self.messages
-            tools_schemas = self.tools.get_schemas()
+            base_sys = self._build_full_system_prompt()
+            if session and session.system_prompt:
+                full_sys = f"{session.system_prompt}\n\n{base_sys}"
+            else:
+                full_sys = base_sys
+            system_msg = Message(role="system", content=full_sys)
+            request_messages = [system_msg] + msg_target
+
+            if session_tool_filter and session:
+                tools_schemas = session_tool_filter.get_schemas(session)
+            else:
+                tools_schemas = self.tools.get_schemas()
 
             await self.plugins.dispatch_model_request(request_messages, tools_schemas)
 
             provider = self.providers.get_active()
+            temp = session.temperature if session else self.temperature
             try:
                 response = await provider.chat(
                     messages=request_messages,
                     tools=tools_schemas if tools_schemas else None,
-                    temperature=self.temperature,
+                    temperature=temp,
                 )
             except Exception as e:
                 await self.plugins.dispatch_error(e)
@@ -536,7 +554,7 @@ class Agent:
                 on_thought(response.reasoning)
 
             await self.plugins.dispatch_model_response(response)
-            self.messages.append(response)
+            msg_target.append(response)
 
             # Check if model requested tool execution
             if not response.tool_calls:
@@ -556,16 +574,201 @@ class Agent:
                     on_tool_start(fn_name, args_dict)
 
                 await self.plugins.dispatch_tool_call(tc)
-                result = await self.tools.execute(tc)
+                if session_tool_filter and session:
+                    result = await session_tool_filter.execute(tc, session)
+                else:
+                    result = await self.tools.execute(tc)
                 await self.plugins.dispatch_tool_result(result)
 
                 if on_tool_end:
                     on_tool_end(fn_name, result.content)
 
                 # Append tool result to conversation
-                self.messages.append(result.to_message())
+                msg_target.append(result.to_message())
 
         return "Agent reached maximum tool iterations without finishing."
+
+    async def run_stream(
+        self,
+        prompt: str,
+        session: Optional[ChatSession] = None,
+        session_tool_filter: Optional[SessionToolFilter] = None,
+        cancel_event: Optional[Any] = None,
+    ) -> AsyncIterator[AgentEvent]:
+        """
+        Streaming execution loop yielding AgentEvent objects.
+        Emits reasoning deltas, text deltas, and tool start/finish events.
+        """
+        sid = session.session_id if session else "default"
+        msg_target = session.messages if session else self.messages
+
+        if not self._is_initialized:
+            await self.initialize()
+
+        processed_prompt = await self.plugins.dispatch_user_message(prompt)
+        msg_target.append(Message(role="user", content=processed_prompt))
+
+        iteration = 0
+        while self.max_iterations is None or iteration < self.max_iterations:
+            if cancel_event and cancel_event.is_set():
+                yield AgentEvent(type=AgentEventType.DONE, session_id=sid, content="Operation cancelled by user.")
+                return
+
+            iteration += 1
+            base_sys = self._build_full_system_prompt()
+            if session and session.system_prompt:
+                full_sys = f"{session.system_prompt}\n\n{base_sys}"
+            else:
+                full_sys = base_sys
+            system_msg = Message(role="system", content=full_sys)
+            request_messages = [system_msg] + msg_target
+
+            if session_tool_filter and session:
+                tools_schemas = session_tool_filter.get_schemas(session)
+            else:
+                tools_schemas = self.tools.get_schemas()
+
+            await self.plugins.dispatch_model_request(request_messages, tools_schemas)
+
+            provider = self.providers.get_active()
+            temp = session.temperature if session else self.temperature
+
+            content_accum: List[str] = []
+            reasoning_accum: List[str] = []
+            stream_tool_calls: List[ToolCall] = []
+
+            try:
+                async for chunk in provider.chat_stream(
+                    messages=request_messages,
+                    tools=tools_schemas if tools_schemas else None,
+                    temperature=temp,
+                ):
+                    if cancel_event and cancel_event.is_set():
+                        yield AgentEvent(type=AgentEventType.DONE, session_id=sid, content="Operation cancelled by user.")
+                        return
+
+                    if chunk.delta_reasoning:
+                        reasoning_accum.append(chunk.delta_reasoning)
+                        yield AgentEvent(
+                            type=AgentEventType.REASONING_DELTA,
+                            session_id=sid,
+                            content=chunk.delta_reasoning,
+                        )
+
+                    if chunk.delta_content:
+                        content_accum.append(chunk.delta_content)
+                        yield AgentEvent(
+                            type=AgentEventType.TEXT_DELTA,
+                            session_id=sid,
+                            content=chunk.delta_content,
+                        )
+
+                    if chunk.tool_calls:
+                        stream_tool_calls.extend(chunk.tool_calls)
+
+            except Exception as e:
+                # If stream fails or not supported, attempt non-streaming fallback
+                logger.warning("Streaming provider call error (%s); trying fallback chat(): %s", type(e).__name__, e)
+                try:
+                    fallback_resp = await provider.chat(
+                        messages=request_messages,
+                        tools=tools_schemas if tools_schemas else None,
+                        temperature=temp,
+                    )
+                    if fallback_resp.reasoning:
+                        yield AgentEvent(type=AgentEventType.REASONING_DELTA, session_id=sid, content=fallback_resp.reasoning)
+                    if fallback_resp.content:
+                        content_accum.append(fallback_resp.content)
+                        yield AgentEvent(type=AgentEventType.TEXT_DELTA, session_id=sid, content=fallback_resp.content)
+                    if fallback_resp.tool_calls:
+                        stream_tool_calls.extend(fallback_resp.tool_calls)
+                except Exception as ex2:
+                    await self.plugins.dispatch_error(ex2)
+                    yield AgentEvent(type=AgentEventType.ERROR, session_id=sid, content=str(ex2))
+                    return
+
+            assistant_msg = Message(
+                role="assistant",
+                content="".join(content_accum) if content_accum else None,
+                reasoning="".join(reasoning_accum) if reasoning_accum else None,
+                tool_calls=stream_tool_calls if stream_tool_calls else None,
+            )
+            await self.plugins.dispatch_model_response(assistant_msg)
+            msg_target.append(assistant_msg)
+
+            # If no tool calls requested, we reached the final response
+            if not stream_tool_calls:
+                yield AgentEvent(
+                    type=AgentEventType.DONE,
+                    session_id=sid,
+                    content="".join(content_accum),
+                )
+                return
+
+            # Execute requested tool calls
+            for tc in stream_tool_calls:
+                if cancel_event and cancel_event.is_set():
+                    yield AgentEvent(type=AgentEventType.DONE, session_id=sid, content="Operation cancelled by user.")
+                    return
+
+                fn_name = tc.function.name
+                server_name = ""
+                if fn_name.startswith("mcp_"):
+                    parts = fn_name.split("_")
+                    if len(parts) >= 2:
+                        server_name = parts[1]
+
+                args_dict = {}
+                try:
+                    args_dict = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                except Exception:
+                    pass
+
+                yield AgentEvent(
+                    type=AgentEventType.TOOL_CALL_STARTED,
+                    session_id=sid,
+                    tool_name=fn_name,
+                    server_name=server_name,
+                    arguments=args_dict,
+                )
+
+                t0 = time.time()
+                await self.plugins.dispatch_tool_call(tc)
+
+                if session_tool_filter and session:
+                    result = await session_tool_filter.execute(tc, session)
+                else:
+                    result = await self.tools.execute(tc)
+
+                duration_ms = (time.time() - t0) * 1000
+                await self.plugins.dispatch_tool_result(result)
+
+                if result.is_error:
+                    yield AgentEvent(
+                        type=AgentEventType.TOOL_CALL_ERROR,
+                        session_id=sid,
+                        tool_name=fn_name,
+                        server_name=server_name,
+                        content=result.content,
+                        duration_ms=duration_ms,
+                    )
+                else:
+                    yield AgentEvent(
+                        type=AgentEventType.TOOL_CALL_RESULT,
+                        session_id=sid,
+                        tool_name=fn_name,
+                        server_name=server_name,
+                        content=result.content,
+                        duration_ms=duration_ms,
+                    )
+
+                msg_target.append(result.to_message())
+
+        yield AgentEvent(
+            type=AgentEventType.DONE,
+            session_id=sid,
+            content="Agent reached maximum tool iterations without finishing.",
+        )
 
     async def clear_history(self) -> None:
         """Clear conversation history."""

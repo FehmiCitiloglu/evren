@@ -20,6 +20,7 @@ from evren_agent.ui.service import EvrenService
 from evren_agent.ui.theme import APP_NAME
 from evren_agent.ui.views.about_view import AboutView
 from evren_agent.ui.views.chat_view import ChatView
+from evren_agent.ui.views.mcp_view import MCPView
 from evren_agent.ui.views.ocr_view import OCRView
 from evren_agent.ui.views.projects_view import ProjectsView
 from evren_agent.ui.views.quota_view import QuotaView
@@ -113,6 +114,7 @@ class EvrenApp(ctk.CTk):
     def destroy(self) -> None:
         self._closing = True
         self.service.cancel_active_stream()
+        self.service.shutdown()
         if hasattr(self.service, "projects") and hasattr(self.service.projects, "scheduler"):
             self.service.projects.scheduler.stop()
         self.after_cancel(self._callback_timer)
@@ -179,6 +181,7 @@ class EvrenApp(ctk.CTk):
         tabs = [
             ("projects", "📁  Projeler"),
             ("chat", "💬  Sohbet"),
+            ("mcp", "🔌  MCP"),
             ("ocr", "👁️  Görsel & OCR"),
             ("transcribe", "🎙️  Ses Çözümleme"),
             ("rerank", "🔍  Sıralama (Rerank)"),
@@ -273,6 +276,7 @@ class EvrenApp(ctk.CTk):
         # Görünümleri oluştur ve sakla
         self.views["projects"] = ProjectsView(self.content_container, service=self.service)
         self.views["chat"] = ChatView(self.content_container, service=self.service)
+        self.views["mcp"] = MCPView(self.content_container, service=self.service)
         self.views["ocr"] = OCRView(self.content_container, service=self.service)
         self.views["transcribe"] = TranscribeView(self.content_container, service=self.service)
         self.views["rerank"] = RerankView(self.content_container, service=self.service)
