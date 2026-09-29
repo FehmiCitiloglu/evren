@@ -136,7 +136,8 @@ class EvrenProvider(BaseProvider):
     def _get_headers(self) -> Dict[str, str]:
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "EvrenAgent/0.2.0",
+            "User-Agent": "EvrenAgent/0.2.3",
+
         }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"

@@ -81,7 +81,8 @@ class EvrenAPI:
         await self._client.aclose()
 
     def _headers(self, path: str, idempotency_key: str | None = None) -> dict[str, str]:
-        headers = {"User-Agent": "EvrenCLI/0.2.0"}
+        headers = {"User-Agent": "EvrenCLI/0.2.3"}
+
         if path.startswith("/v1/"):
             if not self.api_key:
                 raise ValueError("EVREN_API_KEY eksik. Terminalde `evren login` çalıştırın veya EVREN_API_KEY ortam değişkenini ayarlayın.")
