@@ -72,6 +72,7 @@ class Agent:
 
         self.messages: List[Message] = []
         self._is_initialized = False
+        self.computer_use_service: Optional[Any] = None
 
     async def initialize(self) -> None:
         """Bootstraps skills, plugins, MCP servers, and agent meta-tools."""
@@ -111,11 +112,40 @@ class Agent:
             except Exception as e:
                 logger.error("Failed connecting to MCP server %s: %s", name, e)
 
+        # 4.5. Initialize Computer Use if enabled in config
+        cu_conf = self.config.get("computer_use", {})
+        if cu_conf.get("enabled", False):
+            self.enable_computer_use(
+                use_mock=cu_conf.get("use_mock", False),
+                config_dict=cu_conf.get("security"),
+            )
+
         # 5. Dispatch agent init hook
         await self.plugins.dispatch_agent_init(self)
 
         self._is_initialized = True
         logger.info("EvrenAgent '%s' initialized with provider '%s'", self.name, self.providers.active_name)
+
+    def enable_computer_use(
+        self,
+        use_mock: bool = False,
+        config_dict: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Enables and registers native computer-use tools."""
+        from evren_agent.computer_use.security import ComputerUseConfig
+        from evren_agent.computer_use.service import ComputerUseService
+        from evren_agent.computer_use.tools import register_computer_use_tools
+
+        cfg = ComputerUseConfig(**config_dict) if config_dict else None
+        self.computer_use_service = ComputerUseService(config=cfg, use_mock=use_mock)
+        register_computer_use_tools(self.tools, self.computer_use_service)
+        logger.info("Computer use tools successfully mounted to agent.")
+
+    def stop_computer_use(self) -> None:
+        """Signals emergency stop to the active computer use service."""
+        if self.computer_use_service:
+            self.computer_use_service.stop()
+
 
     def _register_meta_tools(self) -> None:
         """Registers self-management tools available to the LLM agent."""

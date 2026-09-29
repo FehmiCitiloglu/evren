@@ -193,7 +193,14 @@ COMMANDS_CATALOG: List[Dict[str, str]] = [
         "syntax": "/exit (or /quit)",
         "description": "Disconnect MCP servers and quit session",
     },
+    {
+        "command": "/computer-use",
+        "category": "Diagnostics",
+        "syntax": "/computer-use [doctor|enable|stop|reset] (or /cu)",
+        "description": "Cross-platform Computer Use diagnostics, doctor, and emergency stop control",
+    },
 ]
+
 
 
 def print_commands_table(category_filter: Optional[str] = None) -> None:
@@ -911,6 +918,27 @@ async def handle_slash_command(agent: Agent, cmd: str) -> bool:
         await agent.clear_history()
         console.print("[yellow]Conversation history cleared.[/yellow]")
 
+    elif root in ("/computer-use", "/cu"):
+        sub = parts[1].lower() if len(parts) > 1 else "status"
+        if sub in ("doctor", "status"):
+            from evren_agent.computer_use.cli import run_doctor
+            run_doctor()
+        elif sub == "enable":
+            agent.enable_computer_use()
+            console.print("[green]Computer Use tools enabled and registered.[/green]")
+        elif sub == "stop":
+            agent.stop_computer_use()
+            console.print("[red]Emergency STOP sent to Computer Use service.[/red]")
+        elif sub == "reset":
+            if agent.computer_use_service:
+                agent.computer_use_service.reset_stop()
+                console.print("[green]Computer Use emergency stop reset.[/green]")
+            else:
+                console.print("[yellow]Computer Use service is not active.[/yellow]")
+        else:
+            console.print("[yellow]Usage: /computer-use [doctor|enable|stop|reset][/yellow]")
+
+
     else:
         console.print(f"[yellow]Unknown command: {root}. Type /help for options.[/yellow]")
 
@@ -1078,10 +1106,14 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "mcp":
         from evren_agent.mcp.cli import main as mcp_main
         raise SystemExit(mcp_main(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] in ("computer-use", "cu"):
+        from evren_agent.computer_use.cli import main as cu_main
+        raise SystemExit(cu_main(sys.argv[2:]))
     parser = argparse.ArgumentParser(
         description="EVREN Agent CLI",
-        epilog="MCP commands: evren-agent mcp --help | Direct API: evren-agent api --help",
+        epilog="MCP commands: evren-agent mcp --help | Computer Use: evren-agent computer-use doctor | Direct API: evren-agent api --help",
     )
+
     parser.add_argument("--prompt", "-p", type=str, help="Single-shot prompt to execute")
     parser.add_argument("--provider", type=str, help="Provider name (evren, llmtr, openai)")
     parser.add_argument("--model", "-m", type=str, help="Model ID")

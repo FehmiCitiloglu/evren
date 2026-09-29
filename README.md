@@ -313,7 +313,8 @@ etkiler: modele iletilen sonuçlar değişmez ve ayrıntılarda eski 200 karakte
 önizleme sınırı yoktur. Etkileşimli terminal bulunmadığında `/details` ayrıntıları
 düz metin olarak yazdırır; fare desteği terminale bağlıdır.
 
-[Detaylı MCP, skill, plugin ve agent kullanım kılavuzu](docs/AGENT.md). Agent REPL'inde `/api ...` için doğrudan `evren` sağlayıcısını seçin. Birim/kontrat testleri sahte HTTP transport kullanır; gerçek anahtara veya ücretli API çağrılarına ihtiyaç duymaz.
+[Detaylı MCP, skill, plugin, computer-use ve agent kullanım kılavuzu](docs/AGENT.md). Bilgisayar denetimi sistem izinleri ve yetenek teşhisi için `evren-agent computer-use doctor` komutunu çalıştırabilirsiniz. Agent REPL'inde `/api ...` için doğrudan `evren` sağlayıcısını seçin. Birim/kontrat testleri sahte HTTP transport kullanır; gerçek anahtara veya ücretli API çağrılarına ihtiyaç duymaz.
+
 
 ## Masaüstü uygulamasını indirme
 

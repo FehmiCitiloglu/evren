@@ -2,8 +2,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List, Optional
 from evren_agent.core.tools import ToolRegistry
-from evren_agent.core.types import ToolDefinition
+from evren_agent.core.types import ContentPart, ToolDefinition, ToolResult
 from evren_agent.mcp.client import MCPClient
+
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +72,32 @@ class MCPManager:
                     if res.isError:
                         err_texts = [c.text for c in res.content if c.text]
                         return f"MCP Tool Error: {' '.join(err_texts)}"
-                    texts = [c.text for c in res.content if c.text]
-                    return "\n".join(texts) if texts else "Success (empty output)"
+                    parts: List[ContentPart] = []
+                    texts: List[str] = []
+                    for c in res.content:
+                        if c.type == "text" and c.text:
+                            texts.append(c.text)
+                            parts.append(ContentPart(type="text", text=c.text))
+                        elif c.type == "image" and c.data:
+                            parts.append(ContentPart(
+                                type="image",
+                                data=c.data,
+                                mime_type=c.mimeType or "image/png",
+                            ))
+                            texts.append(f"[MCP Image: {c.mimeType or 'image/png'}]")
+                    content_str = "\n".join(texts) if texts else "Success (empty output)"
+                    if any(p.type == "image" for p in parts):
+                        return ToolResult(
+                            tool_call_id="",
+                            name=orig_name,
+                            content=content_str,
+                            parts=parts,
+                            is_error=False,
+                        )
+                    return content_str
 
                 return handler
+
 
             handler = await _make_handler(client, orig_tool_name)
             self.tool_registry.register(tool_def, handler)

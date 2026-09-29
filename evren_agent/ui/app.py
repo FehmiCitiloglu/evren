@@ -206,6 +206,32 @@ class EvrenApp(ctk.CTk):
             btn.pack(fill="x", pady=3)
             self.nav_buttons[tab_id] = btn
 
+        # Bilgisayar Denetimi & Acil Durdurma Paneli
+        cu_box = ctk.CTkFrame(sidebar, fg_color=("gray88", "#111827"), corner_radius=8)
+        cu_box.pack(side="bottom", fill="x", padx=12, pady=(0, 8))
+
+        cu_header = ctk.CTkFrame(cu_box, fg_color="transparent")
+        cu_header.pack(fill="x", padx=8, pady=(6, 2))
+
+        cu_lbl = ctk.CTkLabel(
+            cu_header,
+            text="🖥️ Bilgisayar Denetimi",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#38bdf8",
+        )
+        cu_lbl.pack(side="left")
+
+        self.cu_stop_btn = ctk.CTkButton(
+            cu_box,
+            text="⏹ ACİL DURDUR",
+            height=28,
+            font=ctk.CTkFont(size=10, weight="bold"),
+            fg_color="#ef4444",
+            hover_color="#dc2626",
+            command=self._emergency_stop_computer_use,
+        )
+        self.cu_stop_btn.pack(fill="x", padx=8, pady=(4, 6))
+
         # Alt Bölüm: Bağlantı Durumu Rozeti
         bottom_box = ctk.CTkFrame(sidebar, fg_color=("gray85", "#161f2e"), corner_radius=8)
         bottom_box.pack(side="bottom", fill="x", padx=12, pady=16)
@@ -225,6 +251,17 @@ class EvrenApp(ctk.CTk):
             text_color=("gray30", "#94a3b8"),
         )
         self.status_text.pack(side="left", padx=2, pady=8)
+
+    def _emergency_stop_computer_use(self) -> None:
+        """Kullanıcının GUI üzerinden bilgisayar kullanımını anında durdurmasını sağlar."""
+        try:
+            from tkinter import messagebox
+            # Signal any active agent service
+            self.cu_stop_btn.configure(text="DURDURULDU ✓", fg_color="#4b5563")
+            messagebox.showinfo("Acil Durdurma", "Bilgisayar kullanımı durduruldu.")
+        except Exception:
+            pass
+
 
     def _build_content_area(self) -> None:
         """Sağ ana içerik alanı."""

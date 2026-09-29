@@ -14,9 +14,18 @@ class ToolCall(BaseModel):
     function: ToolCallFunction
 
 
+class ContentPart(BaseModel):
+    type: Literal["text", "image", "resource"] = "text"
+    text: Optional[str] = None
+    data: Optional[str] = None  # Base64 string for images/binaries
+    mime_type: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
 class Message(BaseModel):
     role: Literal["system", "user", "assistant", "tool"]
-    content: Optional[str] = None
+    content: Optional[Union[str, List[Dict[str, Any]]]] = None
+    parts: Optional[List[ContentPart]] = None
     reasoning: Optional[str] = None
     name: Optional[str] = None
     tool_call_id: Optional[str] = None
@@ -40,6 +49,7 @@ class ToolResult(BaseModel):
     name: str
     content: str
     is_error: bool = False
+    parts: Optional[List[ContentPart]] = None
 
     def to_message(self) -> Message:
         return Message(
@@ -47,7 +57,9 @@ class ToolResult(BaseModel):
             name=self.name,
             tool_call_id=self.tool_call_id,
             content=self.content,
+            parts=self.parts,
         )
+
 
 
 class ToolDefinition(BaseModel):

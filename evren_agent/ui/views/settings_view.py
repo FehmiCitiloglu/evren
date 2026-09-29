@@ -167,9 +167,52 @@ class SettingsView(ctk.CTkFrame):
         self.scale_combo.set("%100 (Varsayılan)")
         self.scale_combo.grid(row=6, column=1, sticky="w", padx=16, pady=(6, 16))
 
+        # 2.5. BİLGİSAYAR KULLANIMI VE İZİNLER KARTI
+        cu_card = ctk.CTkFrame(self, fg_color=("gray95", "#161f2e"), corner_radius=10)
+        cu_card.grid(row=2, column=0, sticky="ew", padx=16, pady=8)
+        cu_card.grid_columnconfigure(1, weight=1)
+
+        cu_title = ctk.CTkLabel(
+            cu_card,
+            text="🖥️ Bilgisayar Denetimi ve İzinler (Computer Use)",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color="#38bdf8",
+        )
+        cu_title.grid(row=0, column=0, columnspan=2, sticky="w", padx=16, pady=(12, 4))
+
+        cu_desc = ctk.CTkLabel(
+            cu_card,
+            text="Ekran yakalama, fare ve klavye otomasyon yetenekleri ile sistem izinleri durumu.",
+            font=ctk.CTkFont(size=11),
+            text_color=("gray30", "#94a3b8"),
+        )
+        cu_desc.grid(row=1, column=0, columnspan=2, sticky="w", padx=16, pady=(0, 8))
+
+        self.cu_doctor_btn = ctk.CTkButton(
+            cu_card,
+            text="🔍 Sistem İzinlerini Denetle (Doctor)",
+            width=220,
+            height=32,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="transparent",
+            border_width=1,
+            text_color=("gray20", "gray90"),
+            command=self._check_computer_use_permissions,
+        )
+        self.cu_doctor_btn.grid(row=2, column=0, sticky="w", padx=16, pady=(4, 12))
+
+        self.cu_status_lbl = ctk.CTkLabel(
+            cu_card,
+            text="İzin durumu denetlenmedi.",
+            font=ctk.CTkFont(size=11),
+            text_color="#94a3b8",
+        )
+        self.cu_status_lbl.grid(row=2, column=1, sticky="w", padx=8, pady=(4, 12))
+
         # 3. ALT AKSİYON PANELİ: Bağlantıyı Sına & Kaydet
         actions_card = ctk.CTkFrame(self, fg_color="transparent")
-        actions_card.grid(row=2, column=0, sticky="ew", padx=16, pady=16)
+        actions_card.grid(row=3, column=0, sticky="ew", padx=16, pady=16)
+
 
         test_btn = ctk.CTkButton(
             actions_card,
@@ -297,3 +340,34 @@ class SettingsView(ctk.CTkFrame):
         val = scale_map.get(choice, 1.0)
         ctk.set_widget_scaling(val)
         ctk.set_window_scaling(val)
+
+    def _check_computer_use_permissions(self) -> None:
+        """Sistem ekran ve erişilebilirlik izinlerini sorgulayıp durum rozetini günceller."""
+        try:
+            from evren_agent.computer_use.permissions import PermissionChecker
+            perms = PermissionChecker.check_all()
+            details = []
+            all_granted = True
+            for k, v in perms.items():
+                name = k.replace("_", " ").title()
+                if v == "granted":
+                    details.append(f"{name}: ✓ İzin Verildi")
+                else:
+                    details.append(f"{name}: ✗ Reddedildi")
+                    all_granted = False
+
+            summary = " · ".join(details)
+            if all_granted:
+                self.cu_status_lbl.configure(text=f"✓ Tüm İzinler Tamam ({summary})", text_color="#10b981")
+            else:
+                self.cu_status_lbl.configure(text=f"⚠ İzin Eksik: {summary}", text_color="#f59e0b")
+                messagebox.showwarning(
+                    "İzin Gerekli",
+                    "Bilgisayar denetimi için sistem izinleri eksik:\n"
+                    f"{summary}\n\n"
+                    "Lütfen macOS Sistem Ayarları → Gizlilik ve Güvenlik altından\n"
+                    "Ekran Kaydı ve Erişilebilirlik izinlerini veriniz.",
+                )
+        except Exception as e:
+            self.cu_status_lbl.configure(text=f"Hata: {e}", text_color="#ef4444")
+

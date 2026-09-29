@@ -363,6 +363,87 @@ class TranslationPlugin(BasePlugin):
         return text
 ```
 
+
+---
+
+## 🖥️ Cross-Platform Computer Use (GUI Otomasyonu)
+
+EVREN Agent, macOS, Windows ve Linux üzerinde gerçek masaüstü kontrolü ve görsel gözlem yeteneklerine sahiptir.
+
+### Mimari
+
+```text
+               Computer Use Engine (ComputerUseService)
+                               ↓
+                        Platform Backend
+             ┌─────────────────┬─────────────────┬─────────────────┐
+             │      macOS      │     Windows     │      Linux      │
+             │ Quartz / AppKit │ Win32 / UIA / DP│ X11 / Wayland   │
+             └─────────────────┴─────────────────┴─────────────────┘
+                               ↓
+                       Tool Adapter Layer
+             ┌───────────────────────────────────┬─────────────────┐
+             │       Native Agent Tools          │   MCP Server    │
+             └───────────────────────────────────┴─────────────────┘
+                               ↓
+                          EVREN Agent
+                               ↓
+                       Computer Use Skill (Observe → Plan → Act → Verify)
+```
+
+### 16 Standart Araç
+
+1. `computer_environment`: İşletim sistemi, ekran sunucusu, ölçek faktörü, izinler ve yetenekler.
+2. `computer_get_displays`: Bağlı tüm monitörler, çözünürlükler, ofsetler ve birincil ekran.
+3. `computer_screenshot`: Tam ekran, monitör, pencere veya bölge yakalama (Retina/HiDPI ölçeklemeli).
+4. `computer_list_windows`: Açık pencereler, başlıklar, koordinatlar ve uygulama adları.
+5. `computer_focus_window`: Belirtilen pencereyi öne getirme ve odaklama.
+6. `computer_move_pointer`: Fare imlecini mantıksal `(x, y)` koordinatına taşıma.
+7. `computer_click`: Tıklama (`left`, `right`, `middle`, `single`, `double`, `triple`).
+8. `computer_drag`: Sürükleyip bırakma.
+9. `computer_scroll`: Dikey ve yatay tekerlek kaydırma.
+10. `computer_type_text`: Odaklanmış alana Unicode metin yazma.
+11. `computer_key`: Tekil tuş basma (`Return`, `Escape`, `Tab`, `BackSpace`, vb.).
+12. `computer_hotkey`: Kısayol kombinasyonları (`['Command', 'c']` veya `['Ctrl', 'Shift', 'p']`).
+13. `computer_get_clipboard`: Sistem panosundan metin okuma.
+14. `computer_set_clipboard`: Sistem panosuna metin yazma.
+15. `computer_wait`: GUI animasyonları veya sayfa yüklemeleri için bekleme (maks. 30 sn).
+16. `computer_accessibility_snapshot`: Erişilebilirlik ve UI öğe ağacı dökümü.
+
+### Multimodal Görsel Akış
+
+- **Vision Modelleri** (örn. `qwen3-vl-30b`, `gpt-4o`): Ekran görüntüleri otomatik olarak Base64 `image_url` formatına dönüştürülüp modelin görsel algısına sunulur.
+- **Metin Modelleri** (örn. `glm-5.3`): Bağlam patlamasını önlemek için yalnızca insan tarafından okunabilir metin özeti aktarılır.
+
+### Güvenlik ve Acil Durdurma
+
+- **Hız Sınırı**: Tur başına işlem sayısı (`max_actions_per_turn`) sınırlandırılmıştır.
+- **Yasaklı Uygulamalar**: Terminal, Sistem Ayarları, Anahtarlık ve Kayıt Defteri gibi kritik sistem uygulamaları varsayılan olarak engellidir.
+- **Tehlikeli İşlem Koruması**: Hesap silme, disk biçimlendirme ve yetkisiz ödeme tetikleyicileri algılanır.
+- **Denetim İzi & Gizleme**: Şifreler ve API anahtarları loglarda otomatik olarak `[REDACTED]` ile gizlenir.
+- **Acil Durdurma (Emergency STOP)**: Arayüzdeki **ACİL DURDUR** butonu veya `/computer-use stop` komutu tüm işlemleri anında keser.
+
+### CLI Teşhis & Doctor
+
+```bash
+# Sistem izinlerini ve yetenek matrisini denetle:
+evren-agent computer-use doctor
+
+# Standalone stdio MCP sunucusu başlat:
+evren-agent computer-use mcp
+
+# Teşhis ekran görüntüsü kaydet:
+evren-agent computer-use screenshot -o test.png
+```
+
+Agent REPL içinde:
+```text
+/computer-use doctor   # Sistem teşhisini göster
+/computer-use enable   # Bilgisayar denetimi araçlarını bağla
+/computer-use stop     # Acil durdurma tetikle
+/computer-use reset    # Durdurma durumunu sıfırla
+```
+
 ---
 
 ## 🧪 Testing
@@ -373,3 +454,4 @@ Run the test suite with pytest:
 uv pip install -e . pytest-asyncio
 pytest tests/ -v
 ```
+

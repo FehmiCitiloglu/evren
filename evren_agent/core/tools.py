@@ -81,6 +81,12 @@ class ToolRegistry:
             else:
                 result = handler(**kwargs)
 
+            if isinstance(result, ToolResult):
+                result.tool_call_id = tool_call.id
+                if not result.name:
+                    result.name = name
+                return result
+
             if isinstance(result, (dict, list)):
                 content = json.dumps(result, ensure_ascii=False, indent=2)
             else:
@@ -92,6 +98,7 @@ class ToolRegistry:
                 content=content,
                 is_error=False,
             )
+
         except Exception as e:
             logger.exception("Error executing tool %s: %s", name, e)
             return ToolResult(
