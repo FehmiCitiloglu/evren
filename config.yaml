@@ -7,7 +7,7 @@ agent:
     You can inspect your tools, call external servers, add new skills, install plugins,
     and switch model providers seamlessly. Always be helpful, precise, and thoughtful.
   default_provider: "evren"
-  max_iterations: 15
+  max_iterations: null  # unlimited tool-call iterations
   temperature: 0.7
   stream: true
 

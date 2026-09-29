@@ -52,7 +52,11 @@ class Agent:
             "system_prompt",
             "You are EvrenAgent, an autonomous AI assistant.",
         )
-        self.max_iterations: int = agent_conf.get("max_iterations", 15)
+        # max_iterations: int limit, or None / "unlimited" for no cap
+        raw_max_iterations = agent_conf.get("max_iterations", 15)
+        self.max_iterations: Optional[int] = (
+            None if raw_max_iterations in (None, "unlimited") else int(raw_max_iterations)
+        )
         self.temperature: float = agent_conf.get("temperature", 0.7)
 
         # Core registries and managers
@@ -476,7 +480,7 @@ class Agent:
         self.messages.append(Message(role="user", content=processed_prompt))
 
         iteration = 0
-        while iteration < self.max_iterations:
+        while self.max_iterations is None or iteration < self.max_iterations:
             iteration += 1
 
             # Prepare message chain for LLM

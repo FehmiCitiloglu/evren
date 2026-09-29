@@ -25,7 +25,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             "name": "EvrenAgent",
             "system_prompt": "You are EvrenAgent, an autonomous AI assistant.",
             "default_provider": "evren",
-            "max_iterations": 15,
+            "max_iterations": 100,
             "temperature": 0.7,
             "stream": True,
         },
