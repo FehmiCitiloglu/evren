@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import threading
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -66,8 +67,18 @@ def turkce_hata_mesaji(hata: Exception) -> str:
 class EvrenService:
     """evren masaüstü uygulaması için merkezi API yöneticisi."""
 
-    def __init__(self) -> None:
-        self.config = load_config()
+    def __init__(self, dispatch=None) -> None:
+        self._dispatch = dispatch or (lambda callback, *args: callback(*args))
+        self.config_path = None
+        if getattr(sys, "frozen", False):
+            if sys.platform == "win32":
+                base = Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming"))
+            elif sys.platform == "darwin":
+                base = Path.home() / "Library/Application Support"
+            else:
+                base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+            self.config_path = base / "evren" / "config.yaml"
+        self.config = load_config(self.config_path)
         self.provider = "evren"
         self._provider_cfg = self.config.get("providers", {}).get(self.provider, {})
         self.base_url = self._provider_cfg.get("base_url", DEFAULT_BASE_URL)
@@ -98,7 +109,9 @@ class EvrenService:
         self.config["providers"][self.provider]["base_url"] = self.base_url
         self.config["providers"][self.provider]["default_model"] = self.default_model
         self.config["timeout"] = self.timeout
-        save_config(self.config)
+        if self.config_path is not None:
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        save_config(self.config, self.config_path)
 
     def test_connection_async(
         self,
@@ -118,9 +131,9 @@ class EvrenService:
                 asyncio.set_event_loop(loop)
                 result = loop.run_until_complete(run())
                 loop.close()
-                on_success(result)
+                self._dispatch(on_success, result)
             except Exception as e:
-                on_error(turkce_hata_mesaji(e))
+                self._dispatch(on_error, turkce_hata_mesaji(e))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -147,12 +160,12 @@ class EvrenService:
                 models = loop.run_until_complete(run())
                 loop.close()
                 self._cached_models = models
-                on_success(models)
+                self._dispatch(on_success, models)
             except Exception as e:
                 # Ağ hatasında önbellekteki modelleri döner
-                on_success(self._cached_models)
+                self._dispatch(on_success, self._cached_models)
                 if on_error:
-                    on_error(turkce_hata_mesaji(e))
+                    self._dispatch(on_error, turkce_hata_mesaji(e))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -177,9 +190,9 @@ class EvrenService:
                 asyncio.set_event_loop(loop)
                 data = loop.run_until_complete(run())
                 loop.close()
-                on_success(data)
+                self._dispatch(on_success, data)
             except Exception as e:
-                on_error(turkce_hata_mesaji(e))
+                self._dispatch(on_error, turkce_hata_mesaji(e))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -202,9 +215,9 @@ class EvrenService:
                 asyncio.set_event_loop(loop)
                 text = loop.run_until_complete(run())
                 loop.close()
-                on_success(text)
+                self._dispatch(on_success, text)
             except Exception as e:
-                on_error(turkce_hata_mesaji(e))
+                self._dispatch(on_error, turkce_hata_mesaji(e))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -225,9 +238,9 @@ class EvrenService:
                 asyncio.set_event_loop(loop)
                 res = loop.run_until_complete(run())
                 loop.close()
-                on_success(res)
+                self._dispatch(on_success, res)
             except Exception as e:
-                on_error(turkce_hata_mesaji(e))
+                self._dispatch(on_error, turkce_hata_mesaji(e))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -281,7 +294,7 @@ class EvrenService:
                             delta_text += choice.get("delta", {}).get("content") or ""
                         if delta_text:
                             accumulated.append(delta_text)
-                            on_delta(delta_text)
+                            self._dispatch(on_delta, delta_text)
 
             try:
                 loop = asyncio.new_event_loop()
@@ -289,12 +302,12 @@ class EvrenService:
                 loop.run_until_complete(run())
                 loop.close()
                 full_text = "".join(accumulated)
-                on_done(full_text)
+                self._dispatch(on_done, full_text)
             except Exception as e:
                 if cancel_event.is_set():
-                    on_done("".join(accumulated))
+                    self._dispatch(on_done, "".join(accumulated))
                 else:
-                    on_error(turkce_hata_mesaji(e))
+                    self._dispatch(on_error, turkce_hata_mesaji(e))
             finally:
                 if self._active_stream_cancel is cancel_event:
                     self._active_stream_cancel = None
@@ -326,9 +339,9 @@ class EvrenService:
                 asyncio.set_event_loop(loop)
                 result = loop.run_until_complete(run())
                 loop.close()
-                on_success(result)
+                self._dispatch(on_success, result)
             except Exception as e:
-                on_error(turkce_hata_mesaji(e))
+                self._dispatch(on_error, turkce_hata_mesaji(e))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -368,9 +381,9 @@ class EvrenService:
                 asyncio.set_event_loop(loop)
                 result = loop.run_until_complete(run())
                 loop.close()
-                on_success(result)
+                self._dispatch(on_success, result)
             except Exception as e:
-                on_error(turkce_hata_mesaji(e))
+                self._dispatch(on_error, turkce_hata_mesaji(e))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -408,8 +421,8 @@ class EvrenService:
                 asyncio.set_event_loop(loop)
                 items = loop.run_until_complete(run())
                 loop.close()
-                on_success(items)
+                self._dispatch(on_success, items)
             except Exception as e:
-                on_error(turkce_hata_mesaji(e))
+                self._dispatch(on_error, turkce_hata_mesaji(e))
 
         threading.Thread(target=worker, daemon=True).start()

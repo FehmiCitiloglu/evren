@@ -91,3 +91,37 @@ def test_service_settings_update(tmp_path, monkeypatch):
     assert service.base_url == "https://custom.evren.local/v1"
     assert service.default_model == "custom-model-1"
     assert service.timeout == 99.0
+
+
+def test_frozen_settings_use_user_directory(tmp_path, monkeypatch):
+    import sys
+    from pathlib import Path
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    service = EvrenService()
+    service.update_settings("https://example.invalid/v1", "test-model", 42)
+    assert service.config_path.is_relative_to(tmp_path)
+    assert service.config_path.is_file()
+    restored = EvrenService()
+    assert restored.default_model == "test-model"
+    assert restored.timeout == 42
+
+
+def test_worker_callbacks_run_on_gui_thread():
+    import threading
+
+    app = EvrenApp()
+    observed = []
+    try:
+        worker = threading.Thread(target=lambda: app._enqueue_callback(
+            lambda: observed.append(threading.get_ident())))
+        worker.start()
+        worker.join(timeout=2)
+        assert not observed
+        app._drain_callbacks()
+        assert observed == [threading.get_ident()]
+    finally:
+        app.destroy()

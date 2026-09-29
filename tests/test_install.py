@@ -17,6 +17,7 @@ def home(tmp_path, monkeypatch):
     path = tmp_path / "user's home"
     path.mkdir()
     monkeypatch.setenv("HOME", str(path))
+    monkeypatch.setenv("USERPROFILE", str(path))
     monkeypatch.delenv("ZDOTDIR", raising=False)
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     return path
@@ -31,6 +32,7 @@ def make_commands(venv, windows=False):
         path.chmod(0o755)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Executes POSIX /bin/sh profiles")
 @pytest.mark.parametrize("shell, profiles", [
     ("zsh", (".zshrc", ".zprofile")),
     ("bash", (".bashrc", ".profile")),

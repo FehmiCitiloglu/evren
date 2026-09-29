@@ -171,3 +171,14 @@ async def test_repl_routes_bang_without_model(monkeypatch):
     monkeypatch.setattr(agent, "run", AsyncMock(side_effect=AssertionError("Unexpected chat")))
     await cli.run_repl(agent)
     runner.assert_awaited_once_with(agent, "echo repl")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows cmd quoting regression")
+@pytest.mark.asyncio
+async def test_cmd_quoted_executable_and_shell_operators(tmp_path):
+    # A quoted executable path must survive cmd /c along with nested argument quotes.
+    command = f'"{sys.executable}" -c "print(\'hello world\')" && echo second'
+    result = await run_shell(command, shell="cmd.exe", cwd=str(tmp_path))
+    assert "Exit code 0" in result
+    assert "hello world" in result
+    assert "second" in result

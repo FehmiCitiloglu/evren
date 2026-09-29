@@ -1,206 +1,124 @@
-name: Dağıtım ve Sürüm Yayınlama (Release)
+name: Desktop Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Sürüm Etiketi (Örn: v0.2.0)'
+        description: 'Existing version tag (for example v0.2.1)'
         required: true
-        default: 'v0.2.0'
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag_name || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  # 1. Çapraz Platform Masaüstü İkili Paketleri (macOS, Windows, Linux)
   build-desktop:
-    name: ${{ matrix.name }}
+    name: Desktop (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: macOS (Apple Silicon arm64)
-            os: macos-latest
-            arch: arm64
-            artifact_name: evren-macos-arm64.zip
-          - name: macOS (Intel x86_64)
-            os: macos-13
-            arch: x64
-            artifact_name: evren-macos-x64.zip
-          - name: Windows (x64)
-            os: windows-latest
-            arch: x64
-            artifact_name: evren-windows-x64.zip
-          - name: Linux (x86_64)
-            os: ubuntu-latest
-            arch: x86_64
-            artifact_name: evren-linux-x86_64.tar.gz
-
+          - {os: macos-15, platform: macos-arm64, arch: arm64}
+          - {os: macos-15-intel, platform: macos-x64, arch: x64}
+          - {os: windows-2022, platform: windows-x64, arch: x64}
+          - {os: ubuntu-22.04, platform: linux-x86_64, arch: x64}
     steps:
-      - name: Kaynak Kodunu İndir (Checkout)
-        uses: actions/checkout@v4
-
-      - name: Python 3.11 Kur
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag_name || github.ref_name }}
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-          cache: 'pip'
-
-      # Linux bağımlılıkları (Tkinter, SecretService vb.)
-      - name: Linux Sistem Kütüphanelerini Kur
+          architecture: ${{ matrix.arch }}
+          cache: pip
+      - name: Install Linux build and display dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk libtk8.6 libtcl8.6 libsecret-1-dev libglib2.0-dev
-
-      - name: Python Bağımlılıklarını Kur
+          sudo apt-get install -y python3-tk libtk8.6 libtcl8.6 libsecret-1-dev xvfb xauth rpm
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e '.[dev]'
-          pip install pyinstaller
-
-      - name: Birim Testleri Çalıştır
-        run: |
-          pytest
-
-      - name: PyInstaller ile 'evren' Uygulamasını Derle
-        run: |
-          pyinstaller evren.spec --clean --noconfirm
-
-      # macOS Paketleme (evren.app -> .zip)
-      - name: macOS için Paketle (.zip)
-        if: runner.os == 'macOS'
-        run: |
-          cd dist
-          zip -r -y ../${{ matrix.artifact_name }} evren.app
-          cd ..
-
-      # Windows Paketleme (evren.exe -> .zip)
-      - name: Windows için Paketle (.zip)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Compress-Archive -Path dist\evren.exe, evren.bat -DestinationPath ${{ matrix.artifact_name }}
-
-      # Linux Paketleme (evren, desktop kısayolu ve icon -> .tar.gz ve .deb)
-      - name: Linux için Paketle (.tar.gz ve .deb)
+          python -m pip install -e '.[dev]' 'pyinstaller>=6.16,<7'
+      - name: Validate version tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag_name || github.ref_name }}
+        run: python scripts/validate_release.py
+      - name: Test on Linux with virtual display
         if: runner.os == 'Linux'
-        run: |
-          # Taşınabilir tar.gz paketi
-          mkdir -p evren-linux-pkg
-          cp dist/evren evren-linux-pkg/
-          cp evren.desktop evren-linux-pkg/
-          cp evren_agent/ui/assets/icon.png evren-linux-pkg/
-          chmod +x evren-linux-pkg/evren
-          tar -czvf ${{ matrix.artifact_name }} -C evren-linux-pkg .
-
-          # Debian/Ubuntu için .deb paketi
-          VERSION="${GITHUB_REF_NAME#v}"
-          [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF_NAME" ] && VERSION="${{ inputs.tag_name }}"
-          VERSION="${VERSION#v}"
-          [ -z "$VERSION" ] && VERSION="0.2.0"
-
-          mkdir -p deb_root/DEBIAN
-          mkdir -p deb_root/usr/bin
-          mkdir -p deb_root/usr/share/applications
-          mkdir -p deb_root/usr/share/icons/hicolor/256x256/apps
-
-          cp dist/evren deb_root/usr/bin/evren
-          chmod 755 deb_root/usr/bin/evren
-          cp evren.desktop deb_root/usr/share/applications/
-          cp evren_agent/ui/assets/icon.png deb_root/usr/share/icons/hicolor/256x256/apps/evren.png
-
-          cat << EOF > deb_root/DEBIAN/control
-          Package: evren
-          Version: ${VERSION}
-          Section: utils
-          Priority: optional
-          Architecture: amd64
-          Maintainer: EVREN
-          Description: EVREN LLM API Desktop Application
-           Modern cross-platform desktop client for EVREN LLM APIs, OCR, and speech transcription.
-          EOF
-
-          dpkg-deb --build deb_root "evren_${VERSION}_amd64.deb"
-
-      - name: Oluşturulan Paketi Yükle (Upload Artifact)
-        uses: actions/upload-artifact@v4
+        run: xvfb-run -a python -m pytest
+      - name: Test on macOS and Windows
+        if: runner.os != 'Linux'
+        run: python -m pytest
+      - name: Build desktop application
+        run: python -m PyInstaller evren.spec --clean --noconfirm
+      - name: Smoke test packaged application on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python scripts/smoke_desktop.py
+      - name: Smoke test packaged application on macOS and Windows
+        if: runner.os != 'Linux'
+        run: python scripts/smoke_desktop.py
+      - name: Create native installers
+        run: python scripts/package_desktop.py ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
-          path: |
-            ${{ matrix.artifact_name }}
-            *.deb
+          name: desktop-${{ matrix.platform }}
+          path: release_assets/*
           if-no-files-found: error
 
-  # 2. Python Wheel ve Kaynak Paketi (.whl & .tar.gz)
-  build-python-packages:
-    name: Python Paketleri (sdist & wheel)
-    runs-on: ubuntu-latest
+  build-python:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
     steps:
-      - name: Kaynak Kodunu İndir
-        uses: actions/checkout@v4
-
-      - name: Python 3.11 Kur
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag_name || github.ref_name }}
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-
-      - name: build aracını yükle ve paketle
-        run: |
-          python -m pip install --upgrade pip build
-          python -m build
-
-      - name: Python Paketlerini Yükle
-        uses: actions/upload-artifact@v4
+      - run: python -m pip install build
+      - run: python -m build
+      - uses: actions/upload-artifact@v4
         with:
           name: python-dist
           path: dist/*
           if-no-files-found: error
 
-  # 3. GitHub Sürümünü Oluştur ve Dosyaları Yayınla
   publish-release:
-    name: GitHub Release Yayınla
-    needs: [build-desktop, build-python-packages]
-    runs-on: ubuntu-latest
+    needs: [build-desktop, build-python]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
-      - name: Kaynak Kodunu İndir
-        uses: actions/checkout@v4
-
-      - name: Tüm Paketleri İndir
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag_name || github.ref_name }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
         with:
           path: release_assets
           merge-multiple: true
-
-      - name: SHA256 Doğrulama Özetlerini Oluştur
-        run: |
-          cd release_assets
-          sha256sum * > SHA256SUMS.txt || true
-          cat SHA256SUMS.txt
-          cd ..
-
-      - name: Sürüm Etiketini Belirle
-        id: get_tag
-        run: |
-          if [ -n "${{ github.ref_name }}" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          else
-            echo "tag=${{ inputs.tag_name }}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: GitHub Release Oluştur ve Dosyaları Ekle
-        uses: softprops/action-gh-release@v2
+      - name: Verify all installers and generate SHA256 checksums
+        env:
+          RELEASE_TAG: ${{ inputs.tag_name || github.ref_name }}
+        run: python scripts/validate_release.py --assets
+      - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.get_tag.outputs.tag }}
-          name: "evren ${{ steps.get_tag.outputs.tag }}"
+          tag_name: ${{ inputs.tag_name || github.ref_name }}
+          name: evren ${{ inputs.tag_name || github.ref_name }}
           draft: false
           prerelease: false
           generate_release_notes: true
-          files: |
-            release_assets/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          fail_on_unmatched_files: true
+          body_path: packaging/release-notes.md
+          files: release_assets/*

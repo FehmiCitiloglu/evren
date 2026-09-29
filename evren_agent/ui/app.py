@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import platform
+import queue
 import sys
 from typing import Dict, Optional
 import tkinter as tk
@@ -62,7 +63,10 @@ class EvrenApp(ctk.CTk):
         self._setup_app_icon()
 
         # Servis Başlatma
-        self.service = EvrenService()
+        self._callbacks = queue.SimpleQueue()
+        self._closing = False
+        self.service = EvrenService(dispatch=self._enqueue_callback)
+        self._callback_timer = self.after(25, self._drain_callbacks)
 
         # Izgara Düzeni (Solda Yan Menü, Sağda İçerik)
         self.grid_columnconfigure(0, weight=0)
@@ -82,6 +86,30 @@ class EvrenApp(ctk.CTk):
 
         # Arka planda ilk bağlantı durumunu kontrol et
         self.after(500, self._check_initial_status)
+
+    def _enqueue_callback(self, callback, *args) -> None:
+        # Workers never call Tcl/Tk, including after(), directly.
+        if not self._closing:
+            self._callbacks.put((callback, args))
+
+    def _drain_callbacks(self) -> None:
+        for _ in range(100):
+            try:
+                callback, args = self._callbacks.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                callback(*args)
+            except Exception:
+                self.report_callback_exception(*sys.exc_info())
+        if not self._closing:
+            self._callback_timer = self.after(25, self._drain_callbacks)
+
+    def destroy(self) -> None:
+        self._closing = True
+        self.service.cancel_active_stream()
+        self.after_cancel(self._callback_timer)
+        super().destroy()
 
     def _setup_app_icon(self) -> None:
         """Pencere simgesini platforma uygun ayarlar."""
@@ -274,6 +302,8 @@ class EvrenApp(ctk.CTk):
 def main() -> int:
     """evren masaüstü uygulamasını başlatır."""
     app = EvrenApp()
+    if "--smoke-test" in sys.argv:
+        app.after(250, app.destroy)
     app.mainloop()
     return 0
 

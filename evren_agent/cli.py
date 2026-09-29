@@ -715,7 +715,13 @@ async def handle_slash_command(agent: Agent, cmd: str) -> bool:
                 console.print(table)
 
         elif sub == "add":
-            raw_tokens = shlex.split(cmd)[2:]
+            # Keep Windows path separators, while retaining quoted paths with spaces.
+            lexer = shlex.shlex(cmd, posix=True)
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            if sys.platform == "win32":
+                lexer.escape = ""
+            raw_tokens = list(lexer)[2:]
             p = argparse.ArgumentParser(prog="/mcp add", add_help=False)
             p.add_argument("--url", type=str, default=None)
             p.add_argument("-e", "--env", action="append", default=[])

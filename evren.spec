@@ -4,20 +4,20 @@
 macOS (evren.app), Windows (evren.exe) ve Linux (evren)
 için tek tıkla çalıştırılabilir ikili (binary) paketler üretir.
 """
-import os
+from importlib.metadata import version
 import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = [
-    "keyring.backends.macOS",
-    "keyring.backends.Windows",
-    "keyring.backends.SecretService",
-    "keyring.backends.chainer",
-    "PIL._tkinter_finder",
-]
+hiddenimports = ["keyring.backends.chainer", "PIL._tkinter_finder"]
+hiddenimports.append({
+    "darwin": "keyring.backends.macOS",
+    "win32": "keyring.backends.Windows",
+}.get(sys.platform, "keyring.backends.SecretService"))
+app_version = version("evren-agent")
+
 
 # CustomTkinter varlıkları (fontlar, JSON tema dosyaları, ikonlar)
 ctk_datas, ctk_binaries, ctk_hidden = collect_all("customtkinter")
@@ -72,9 +72,10 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
+    [] if is_mac else a.binaries,
+    [] if is_mac else a.datas,
     [],
+    exclude_binaries=is_mac,
     name="evren",
     debug=False,
     bootloader_ignore_signals=False,
@@ -92,8 +93,9 @@ exe = EXE(
 )
 
 if is_mac:
+    collected = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="evren")
     app = BUNDLE(
-        exe,
+        collected,
         name="evren.app",
         icon=icon_file,
         bundle_identifier="ssyz.evren.desktop",
@@ -102,8 +104,8 @@ if is_mac:
             "CFBundleDisplayName": "evren",
             "CFBundleGetInfoString": "EVREN LLM API Masaüstü Uygulaması",
             "CFBundleIdentifier": "ssyz.evren.desktop",
-            "CFBundleVersion": "0.2.0",
-            "CFBundleShortVersionString": "0.2.0",
+            "CFBundleVersion": app_version,
+            "CFBundleShortVersionString": app_version,
             "NSHighResolutionCapable": "True",
         },
     )

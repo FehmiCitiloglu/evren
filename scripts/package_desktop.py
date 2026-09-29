@@ -1,0 +1,100 @@
+"""Package a native PyInstaller build; invoked on each release runner."""
+from importlib.metadata import version
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tarfile
+import zipfile
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "release_assets"
+VERSION = version("evren-agent")
+
+
+def run(*args):
+    subprocess.run([str(a) for a in args], check=True, cwd=ROOT)
+
+
+def linux():
+    stage = ROOT / "build/linux-package"
+    (stage / "usr/bin").mkdir(parents=True, exist_ok=True)
+    apps = stage / "usr/share/applications"
+    icons = stage / "usr/share/icons/hicolor/256x256/apps"
+    apps.mkdir(parents=True, exist_ok=True)
+    icons.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / "dist/evren", stage / "usr/bin/evren")
+    (stage / "usr/bin/evren").chmod(0o755)
+    desktop = (ROOT / "evren.desktop").read_text().replace("Exec=evren gui", "Exec=evren")
+    (apps / "evren.desktop").write_text(desktop)
+    shutil.copy2(ROOT / "evren_agent/ui/assets/icon.png", icons / "evren.png")
+    with tarfile.open(OUT / f"evren-{VERSION}-linux-x86_64.tar.gz", "w:gz") as archive:
+        archive.add(stage / "usr", arcname="usr")
+    control = stage / "DEBIAN"
+    control.mkdir(exist_ok=True)
+    (control / "control").write_text(f"""Package: evren
+Version: {VERSION}
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: EVREN <noreply@ssyz.org.tr>
+Depends: libc6 (>= 2.35), libx11-6, libxext6, libxft2, libxrender1, libfontconfig1
+Recommends: gnome-keyring
+Description: EVREN desktop client
+ Chat, OCR, transcription and reranking with EVREN APIs.
+""")
+    run("dpkg-deb", "--root-owner-group", "--build", stage, OUT / f"evren_{VERSION}_amd64.deb")
+    # rpmbuild uses the same payload, with explicit runtime dependencies.
+    top = ROOT / "build/rpm"
+    for name in ("BUILD", "BUILDROOT", "RPMS", "SOURCES", "SPECS", "SRPMS"):
+        (top / name).mkdir(parents=True, exist_ok=True)
+    spec = top / "SPECS/evren.spec"
+    spec.write_text(f"""Name: evren
+Version: {VERSION}
+Release: 1
+Summary: EVREN desktop client
+License: Proprietary
+BuildArch: x86_64
+AutoReqProv: no
+Requires: glibc >= 2.35, libX11, libXext, libXft, libXrender, fontconfig
+%description
+Chat, OCR, transcription and reranking with EVREN APIs.
+%install
+mkdir -p %{{buildroot}}/usr
+cp -a "{stage}/usr/." %{{buildroot}}/usr/
+%files
+/usr/bin/evren
+/usr/share/applications/evren.desktop
+/usr/share/icons/hicolor/256x256/apps/evren.png
+""")
+    run("rpmbuild", "--define", f"_topdir {top}", "--define", "__os_install_post %{nil}", "-bb", spec)
+    for rpm in (top / "RPMS").rglob("*.rpm"):
+        shutil.copy2(rpm, OUT / rpm.name)
+
+
+def macos(arch):
+    stage = ROOT / "build/dmg"
+    stage.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(ROOT / "dist/evren.app", stage / "evren.app", symlinks=True, dirs_exist_ok=True)
+    (stage / "Applications").symlink_to("/Applications", target_is_directory=True)
+    run("hdiutil", "create", "-volname", "evren", "-srcfolder", stage, "-ov", "-format", "UDZO",
+        OUT / f"evren-{VERSION}-macos-{arch}.dmg")
+    run("ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", ROOT / "dist/evren.app",
+        OUT / f"evren-{VERSION}-macos-{arch}.zip")
+
+
+def windows():
+    compiler = shutil.which("iscc") or r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+    run(compiler, f"/DAppVersion={VERSION}", ROOT / "packaging/windows.iss")
+    with zipfile.ZipFile(OUT / f"evren-{VERSION}-windows-x64.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.write(ROOT / "dist/evren.exe", "evren.exe")
+
+
+if __name__ == "__main__":
+    OUT.mkdir(exist_ok=True)
+    if sys.platform == "darwin":
+        macos(sys.argv[1])
+    elif sys.platform == "win32":
+        windows()
+    else:
+        linux()

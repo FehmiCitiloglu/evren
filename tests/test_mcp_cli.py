@@ -131,7 +131,7 @@ async def test_repl_mcp_slash_commands(temp_config: Path, mock_server_path: str)
     assert await handle_slash_command(agent, "/mcp list") is True
 
     # 2. /mcp add connects in-memory AND persists to config
-    add_cmd = f"/mcp add repl_mock {sys.executable} {mock_server_path}"
+    add_cmd = f'/mcp add repl_mock "{sys.executable}" "{mock_server_path}"'
     assert await handle_slash_command(agent, add_cmd) is True
 
     # Verify tool is available in agent tool registry

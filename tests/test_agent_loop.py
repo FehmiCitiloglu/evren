@@ -1,6 +1,9 @@
 from __future__ import annotations
 from typing import Any, AsyncIterator, Dict, List, Optional
 import pytest
+import shlex
+import subprocess
+import sys
 
 from evren_agent.core.agent import Agent
 from evren_agent.core.types import (
@@ -128,7 +131,9 @@ async def test_agent_meta_tools():
     assert r_res == "Hello Evren Agent!"
 
     # 3. Test run_command meta-tool
-    cmd_res = agent.run_command("python3 -c \"print('Hello from shell')\"")
+    args = [sys.executable, "-c", "print('Hello from shell')"]
+    command = subprocess.list2cmdline(args) if sys.platform == "win32" else shlex.join(args)
+    cmd_res = agent.run_command(command)
     assert "Hello from shell" in cmd_res
     assert "Exit code 0" in cmd_res
 

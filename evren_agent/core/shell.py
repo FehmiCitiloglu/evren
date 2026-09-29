@@ -65,10 +65,14 @@ async def run_shell(command: str, shell: Optional[str] = None,
     try:
         args = shell_args(command, shell)
         options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if sys.platform == "win32" else {"start_new_session": True}
-        process = await asyncio.create_subprocess_exec(
-            *args, cwd=cwd, stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **options,
-        )
+        streams = dict(cwd=cwd, stdin=asyncio.subprocess.DEVNULL,
+                       stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **options)
+        if sys.platform == "win32" and Path(args[0]).name.lower() in ("cmd", "cmd.exe"):
+            # list2cmdline escapes embedded quotes for the C runtime, not cmd.exe.
+            # Let subprocess construct cmd's raw /c command line instead.
+            process = await asyncio.create_subprocess_shell(command, executable=args[0], **streams)
+        else:
+            process = await asyncio.create_subprocess_exec(*args, **streams)
     except (OSError, ValueError) as exc:
         return f"Command execution error: {exc}"
 

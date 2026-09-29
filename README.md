@@ -314,3 +314,30 @@ etkiler: modele iletilen sonuçlar değişmez ve ayrıntılarda eski 200 karakte
 düz metin olarak yazdırır; fare desteği terminale bağlıdır.
 
 [Detaylı MCP, skill, plugin ve agent kullanım kılavuzu](docs/AGENT.md). Agent REPL'inde `/api ...` için doğrudan `evren` sağlayıcısını seçin. Birim/kontrat testleri sahte HTTP transport kullanır; gerçek anahtara veya ücretli API çağrılarına ihtiyaç duymaz.
+
+## Masaüstü uygulamasını indirme
+
+Hazır kurulum dosyaları [GitHub Releases](https://github.com/FehmiCitiloglu/evren/releases/latest) sayfasındadır:
+
+| Sistem | Dosya |
+| --- | --- |
+| Windows x64 | `evren-VERSION-windows-x64-setup.exe` |
+| macOS 15+ Apple Silicon | `evren-VERSION-macos-arm64.dmg` |
+| macOS 15+ Intel | `evren-VERSION-macos-x64.dmg` |
+| Ubuntu 22.04+ / Debian 12+ | `evren_VERSION_amd64.deb` |
+| Fedora / openSUSE (glibc 2.35+) | `evren-VERSION-1.x86_64.rpm` |
+| Diğer Linux x86_64 (glibc 2.35+, X11/XWayland) | `evren-VERSION-linux-x86_64.tar.gz` |
+
+Windows kurucusu kullanıcı hesabına yükler; macOS'ta DMG içinden uygulamayı Applications'a sürükleyin. Python kurulumu gerekmez. ZIP dosyaları taşınabilir Windows/macOS alternatifleridir. Linux arşivinde `usr/bin/evren` çalıştırılır. Alpine/musl desteklenmez. Linux'ta anahtar kaydetmek için Secret Service uyumlu, açık bir anahtarlık gerekir.
+
+Paketler henüz geliştirici sertifikasıyla imzalanmadığından Windows SmartScreen ve macOS Gatekeeper onay isteyebilir. Dosya bütünlüğü `SHA256SUMS.txt` ile kontrol edilebilir.
+
+Paketli uygulamanın ayarları Windows'ta `%APPDATA%/evren`, macOS'ta `~/Library/Application Support/evren`, Linux'ta `$XDG_CONFIG_HOME/evren` (varsayılan `~/.config/evren`) altında saklanır.
+
+### Yeni sürüm yayınlama
+
+1. `pyproject.toml` sürümünü güncelleyin ve değişikliği GitHub'a gönderin.
+2. Aynı sürümün etiketini gönderin: örneğin `git tag v0.2.1` ve `git push origin v0.2.1`.
+3. **Desktop Release** her işletim sisteminde testleri, PyInstaller derlemesini ve paketli uygulamanın açılış kontrolünü çalıştırır. Tüm kurulum dosyaları hazır olduğunda release yayınlanır.
+
+Yeniden denemek için Actions → Desktop Release → Run workflow alanında **mevcut etiketi** girin. Manuel çalıştırma da etiketin kaynak kodunu derler; başka bir commit'i o sürümmüş gibi yayınlamaz.
