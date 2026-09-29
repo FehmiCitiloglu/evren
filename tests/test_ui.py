@@ -111,20 +111,27 @@ def test_frozen_settings_use_user_directory(tmp_path, monkeypatch):
 
 
 def test_worker_callbacks_run_on_gui_thread():
+    import queue
     import threading
+    from types import SimpleNamespace
 
-    app = EvrenApp()
+    # Exercise dispatch without creating another Tcl interpreter in this process.
     observed = []
-    try:
-        worker = threading.Thread(target=lambda: app._enqueue_callback(
-            lambda: observed.append(threading.get_ident())))
-        worker.start()
-        worker.join(timeout=2)
-        assert not observed
-        app._drain_callbacks()
-        assert observed == [threading.get_ident()]
-    finally:
-        app.destroy()
+    main_thread = threading.get_ident()
+
+    def schedule(*args):
+        assert threading.get_ident() == main_thread
+
+    app = SimpleNamespace(_callbacks=queue.SimpleQueue(), _closing=False,
+                          after=schedule, _drain_callbacks=lambda: None)
+    worker = threading.Thread(target=lambda: EvrenApp._enqueue_callback(
+        app, lambda: observed.append(threading.get_ident())))
+    worker.start()
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert not observed
+    EvrenApp._drain_callbacks(app)
+    assert observed == [main_thread]
 
 
 def test_linux_font_policy_is_bundled(monkeypatch):
