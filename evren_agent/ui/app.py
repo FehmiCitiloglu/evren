@@ -21,10 +21,12 @@ from evren_agent.ui.theme import APP_NAME
 from evren_agent.ui.views.about_view import AboutView
 from evren_agent.ui.views.chat_view import ChatView
 from evren_agent.ui.views.ocr_view import OCRView
+from evren_agent.ui.views.projects_view import ProjectsView
 from evren_agent.ui.views.quota_view import QuotaView
 from evren_agent.ui.views.rerank_view import RerankView
 from evren_agent.ui.views.settings_view import SettingsView
 from evren_agent.ui.views.transcribe_view import TranscribeView
+
 from pathlib import Path
 
 
@@ -111,8 +113,11 @@ class EvrenApp(ctk.CTk):
     def destroy(self) -> None:
         self._closing = True
         self.service.cancel_active_stream()
+        if hasattr(self.service, "projects") and hasattr(self.service.projects, "scheduler"):
+            self.service.projects.scheduler.stop()
         self.after_cancel(self._callback_timer)
         super().destroy()
+
 
     def _setup_app_icon(self) -> None:
         """Pencere simgesini platforma uygun ayarlar."""
@@ -172,6 +177,7 @@ class EvrenApp(ctk.CTk):
 
         # Gezinme Butonları Listesi
         tabs = [
+            ("projects", "📁  Projeler"),
             ("chat", "💬  Sohbet"),
             ("ocr", "👁️  Görsel & OCR"),
             ("transcribe", "🎙️  Ses Çözümleme"),
@@ -228,6 +234,7 @@ class EvrenApp(ctk.CTk):
         self.content_container.grid_rowconfigure(0, weight=1)
 
         # Görünümleri oluştur ve sakla
+        self.views["projects"] = ProjectsView(self.content_container, service=self.service)
         self.views["chat"] = ChatView(self.content_container, service=self.service)
         self.views["ocr"] = OCRView(self.content_container, service=self.service)
         self.views["transcribe"] = TranscribeView(self.content_container, service=self.service)
@@ -235,6 +242,7 @@ class EvrenApp(ctk.CTk):
         self.views["quota"] = QuotaView(self.content_container, service=self.service)
         self.views["settings"] = SettingsView(self.content_container, service=self.service)
         self.views["about"] = AboutView(self.content_container)
+
 
     def show_view(self, tab_id: str) -> None:
         """Belirtilen görünümü ekranda gösterir."""
@@ -270,9 +278,14 @@ class EvrenApp(ctk.CTk):
         self.bind("<Control-n>", lambda _: self._on_new_chat_shortcut())
         self.bind("<Command-n>", lambda _: self._on_new_chat_shortcut())
 
+        # Projeler: Ctrl+P veya Cmd+P
+        self.bind("<Control-p>", lambda _: self.show_view("projects"))
+        self.bind("<Command-p>", lambda _: self.show_view("projects"))
+
         # Ayarlar: Ctrl+, veya Cmd+,
         self.bind("<Control-comma>", lambda _: self.show_view("settings"))
         self.bind("<Command-comma>", lambda _: self.show_view("settings"))
+
 
     def _on_new_chat_shortcut(self) -> None:
         self.show_view("chat")

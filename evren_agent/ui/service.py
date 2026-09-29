@@ -19,6 +19,8 @@ import httpx
 from evren_agent.api.client import DEFAULT_BASE_URL, EvrenAPI, EvrenAPIError, media_data_url
 from evren_agent.config import load_config, save_config
 from evren_agent.credentials import get_api_key, set_api_key
+from evren_agent.projects.service import ProjectService
+
 
 
 # Çevrimdışı veya ilk yüklemede gösterilecek popüler varsayılan modeller
@@ -86,6 +88,11 @@ class EvrenService:
         self.timeout = float(self.config.get("timeout", 180.0))
         self._cached_models: List[str] = VARSAYILAN_MODELLER.copy()
         self._active_stream_cancel: Optional[threading.Event] = None
+        db_path = None
+        if self.config_path:
+            db_path = self.config_path.parent / "projects.db"
+        self.projects = ProjectService(db_path=db_path)
+
 
     def get_key(self) -> str:
         """Kayıtlı API anahtarını işletim sistemi kasasından veya ortamdan okur."""
