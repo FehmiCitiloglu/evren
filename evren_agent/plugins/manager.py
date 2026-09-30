@@ -14,13 +14,20 @@ from evren_agent.plugins.builtins.web_search import WebSearchPlugin
 logger = logging.getLogger(__name__)
 
 
+def _is_root_or_root_child(path: Path) -> bool:
+    try:
+        resolved = path.resolve()
+        return resolved.parent == resolved or resolved.parent.parent == resolved.parent
+    except Exception:
+        return True
+
+
 def _resolve_safe_plugins_dir(plugins_dir: Optional[Union[str, Path]] = None) -> Path:
     target = Path(plugins_dir or "plugins")
     try:
-        resolved = target.resolve()
-        if resolved.parent == Path("/"):
+        if _is_root_or_root_child(target):
             return Path.home() / ".evren" / "plugins"
-        return resolved
+        return target.resolve()
     except Exception:
         return Path.home() / ".evren" / "plugins"
 

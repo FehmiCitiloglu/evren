@@ -74,12 +74,16 @@ class Agent:
         if self.config_path:
             try:
                 cfg_p = Path(self.config_path).resolve()
-                if cfg_p.parent != Path("/"):
+                if cfg_p.parent != cfg_p.parent.parent:
                     base_dir = cfg_p.parent
             except Exception:
                 pass
-        if base_dir is None and os.getcwd() == "/":
-            base_dir = Path.home() / ".evren"
+        if base_dir is None:
+            try:
+                if Path.cwd().parent == Path.cwd():
+                    base_dir = Path.home() / ".evren"
+            except Exception:
+                base_dir = Path.home() / ".evren"
 
         skills_conf = self.config.get("skills", {})
         skills_raw = skills_conf.get("directory", "skills")

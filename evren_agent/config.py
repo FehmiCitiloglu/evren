@@ -9,10 +9,18 @@ import yaml
 load_dotenv()
 
 
+def _is_root_or_root_child(path: Path) -> bool:
+    try:
+        resolved = path.resolve()
+        return resolved.parent == resolved or resolved.parent.parent == resolved.parent
+    except Exception:
+        return True
+
+
 def _resolve_default_config_path() -> Path:
     default_path = Path("config.yaml")
     try:
-        if default_path.resolve().parent == Path("/"):
+        if _is_root_or_root_child(default_path):
             return Path.home() / ".evren" / "config.yaml"
     except Exception:
         return Path.home() / ".evren" / "config.yaml"

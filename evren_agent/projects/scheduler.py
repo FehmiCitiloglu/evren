@@ -36,6 +36,7 @@ class ProjectScheduler:
         self._active_project_id: Optional[str] = None
         self._interval_setting: str = "Every 30 minutes"
         self._lock = threading.Lock()
+        self._stop_event = threading.Event()
 
         self._setup_event_listeners()
 
@@ -98,17 +99,22 @@ class ProjectScheduler:
         if self._running:
             return
         self._running = True
+        self._stop_event.clear()
         self._timer_thread = threading.Thread(target=self._run_loop, daemon=True)
         self._timer_thread.start()
 
     def stop(self) -> None:
         self._running = False
+        self._stop_event.set()
+        if self._timer_thread and self._timer_thread.is_alive():
+            self._timer_thread.join(timeout=1.0)
 
     def _run_loop(self) -> None:
         elapsed = 0
-        while self._running:
-            time.sleep(10)
-            elapsed += 10
+        while self._running and not self._stop_event.is_set():
+            if self._stop_event.wait(timeout=1.0):
+                break
+            elapsed += 1
 
             with self._lock:
                 pid = self._active_project_id

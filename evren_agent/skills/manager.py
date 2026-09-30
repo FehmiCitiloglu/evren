@@ -54,13 +54,20 @@ class SkillDict(dict):
         return super().pop(resolved, *args)
 
 
+def _is_root_or_root_child(path: Path) -> bool:
+    try:
+        resolved = path.resolve()
+        return resolved.parent == resolved or resolved.parent.parent == resolved.parent
+    except Exception:
+        return True
+
+
 def _resolve_safe_skills_dir(skills_dir: Optional[Union[str, Path]] = None) -> Path:
     target = Path(skills_dir or "skills")
     try:
-        resolved = target.resolve()
-        if resolved.parent == Path("/"):
+        if _is_root_or_root_child(target):
             return Path.home() / ".evren" / "skills"
-        return resolved
+        return target.resolve()
     except Exception:
         return Path.home() / ".evren" / "skills"
 
