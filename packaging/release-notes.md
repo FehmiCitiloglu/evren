@@ -1,3 +1,9 @@
+## v0.2.5 değişiklikleri
+
+- Proje çalışma alanında duyarlı yerleşim ve akış halinde ajan sohbeti.
+- Varsayılan reranker modeli Qwen3 olarak güncellendi.
+- Windows'ta sayısal Enter tuşu testi, Tk'nin yerel tuş eşlemesine göre düzeltildi.
+
 ## Masaüstü kurulumu
 
 - **Windows x64:** `windows-x64-setup.exe` dosyasını açın. Kullanıcı hesabınıza kurulur; Python gerekmez. ZIP taşınabilir sürümdür.

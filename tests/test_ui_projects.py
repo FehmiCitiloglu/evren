@@ -94,7 +94,10 @@ def test_projects_view_full_lifecycle(monkeypatch):
             pv.coding_input.insert(0, "Sayısal Enter")
             pv.coding_input.focus_force()
             app.update()
-            app.focus_get().event_generate("<KP_Enter>")
+            # Windows Tk maps both Enter keys to Return; KP_Enter has no native
+            # keycode there, so generating it does not dispatch a key event.
+            keypad_enter = "<Return>" if app.tk.call("tk", "windowingsystem") == "win32" else "<KP_Enter>"
+            app.focus_get().event_generate(keypad_enter)
             app.update()
             assert len(streams) == 3
             assert streams[-1]["prompt"] == "Sayısal Enter"
