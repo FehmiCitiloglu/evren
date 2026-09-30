@@ -65,7 +65,7 @@ evren login --provider llmtr        # İsteğe bağlı diğer sağlayıcı
 evren login --provider openai
 ```
 
-Anahtarlar sağlayıcı, API adresi ve `api_key_env` adına göre ayrı saklanır. Özel bir adres için `evren login --base-url https://evren.ssyz.org.tr//v1` veya `--config DOSYA` kullanın. `login` anahtarı kaydeder; geçerliliğini API'de sorgulamaz. `evren models` ile bağlantıyı kontrol edebilirsiniz.
+Anahtarlar sağlayıcı, API adresi ve `api_key_env` adına göre ayrı saklanır. Özel bir adres için `evren login --base-url https://evren.ssyz.org.tr/v1` veya `--config DOSYA` kullanın. `login` anahtarı kaydeder; geçerliliğini API'de sorgulamaz. `evren models` ile bağlantıyı kontrol edebilirsiniz.
 
 Mevcut ortam değişkenleri ve `.env` dosyaları geriye dönük uyumluluk için desteklenir ve kasadaki anahtardan önce gelir. Yeni kaydı kullanmak için eski ortam/`.env` değerini kaldırın. Şablon anahtarlar gerçek anahtar sayılmaz. `--help`, `--commands`, `api-docs`, `health` ve MCP yönetimi anahtar istemez. Terminal dışı çalıştırmalarda (pipe/CI) giriş beklenmez; kayıtlı anahtar veya ortam değişkeni yoksa açıklayıcı hata döner.
 

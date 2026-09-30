@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 from pathlib import Path
@@ -68,15 +69,36 @@ class Agent:
         self.providers = ProviderRegistry.from_config(self.config)
         self.mcp = MCPManager(self.tools)
 
+        # Determine base directory for resolving relative paths in configuration
+        base_dir: Optional[Path] = None
+        if self.config_path:
+            try:
+                cfg_p = Path(self.config_path).resolve()
+                if cfg_p.parent != Path("/"):
+                    base_dir = cfg_p.parent
+            except Exception:
+                pass
+        if base_dir is None and os.getcwd() == "/":
+            base_dir = Path.home() / ".evren"
+
         skills_conf = self.config.get("skills", {})
-        self.skills = SkillManager(skills_dir=skills_conf.get("directory", "skills"))
+        skills_raw = skills_conf.get("directory", "skills")
+        skills_path = Path(skills_raw)
+        if not skills_path.is_absolute() and base_dir:
+            skills_path = base_dir / skills_path
+        self.skills = SkillManager(skills_dir=skills_path)
 
         plugins_conf = self.config.get("plugins", {})
-        self.plugins = PluginManager(self.tools, plugins_dir=plugins_conf.get("directory", "plugins"))
+        plugins_raw = plugins_conf.get("directory", "plugins")
+        plugins_path = Path(plugins_raw)
+        if not plugins_path.is_absolute() and base_dir:
+            plugins_path = base_dir / plugins_path
+        self.plugins = PluginManager(self.tools, plugins_dir=plugins_path)
 
         self.messages: List[Message] = []
         self._is_initialized = False
         self.computer_use_service: Optional[Any] = None
+        self.default_cwd: Optional[str] = None
 
     async def initialize(self) -> None:
         """Bootstraps skills, plugins, MCP servers, and agent meta-tools."""
@@ -433,8 +455,9 @@ class Agent:
     def run_command(self, command: str, shell: Optional[str] = None,
                     cwd: Optional[str] = None, timeout: float = 60) -> str:
         """Synchronous SDK compatibility; async callers should use run_command_async."""
+        target_cwd = cwd or getattr(self, "default_cwd", None)
         def execute():
-            return asyncio.run(self.run_command_async(command, shell, cwd, timeout))
+            return asyncio.run(self.run_command_async(command, shell, target_cwd, timeout))
 
         try:
             asyncio.get_running_loop()
@@ -446,7 +469,8 @@ class Agent:
 
     async def run_command_async(self, command: str, shell: Optional[str] = None,
                                 cwd: Optional[str] = None, timeout: float = 60) -> str:
-        return await run_shell(command, shell=shell, cwd=cwd, timeout=timeout)
+        target_cwd = cwd or getattr(self, "default_cwd", None)
+        return await run_shell(command, shell=shell, cwd=target_cwd, timeout=timeout)
 
     async def run_local_command(self, command: str) -> str:
         """Execute an explicit user command without a model call, retaining context."""
@@ -469,6 +493,8 @@ class Agent:
 
     def read_file(self, path: str) -> str:
         p = Path(path)
+        if not p.is_absolute() and getattr(self, "default_cwd", None):
+            p = Path(self.default_cwd) / p
         if not p.exists():
             return f"Error: File not found: {path}"
         try:
@@ -478,6 +504,8 @@ class Agent:
 
     def write_file(self, path: str, content: str) -> str:
         p = Path(path)
+        if not p.is_absolute() and getattr(self, "default_cwd", None):
+            p = Path(self.default_cwd) / p
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content, encoding="utf-8")

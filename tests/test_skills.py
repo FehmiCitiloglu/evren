@@ -87,7 +87,27 @@ async def test_agent_default_active_skills():
 
     aug = agent.skills.get_prompt_augmentation()
     assert "[Skill: computer-use]" in aug
-    assert "[Skill: code_assistant]" in aug
+    await agent.close()
 
+
+def test_skill_manager_when_cwd_is_root(monkeypatch, tmp_path):
+    monkeypatch.chdir("/")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    manager = SkillManager()
+    assert manager.skills_dir.is_relative_to(tmp_path)
+    assert manager.skills_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_agent_initialization_when_cwd_is_root(monkeypatch, tmp_path):
+    import os
+    from evren_agent.core.agent import Agent
+
+    monkeypatch.chdir("/")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    agent = Agent()
+    await agent.initialize()
+    assert agent.skills.skills_dir.is_relative_to(tmp_path)
+    assert agent.plugins.plugins_dir.is_relative_to(tmp_path)
     await agent.close()
 

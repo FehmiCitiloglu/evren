@@ -90,7 +90,7 @@ class EvrenService:
     def __init__(self, dispatch=None) -> None:
         self._dispatch = dispatch or (lambda callback, *args: callback(*args))
         self.config_path = None
-        if getattr(sys, "frozen", False):
+        if getattr(sys, "frozen", False) or os.getcwd() == "/":
             if sys.platform == "win32":
                 base = Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming"))
             elif sys.platform == "darwin":

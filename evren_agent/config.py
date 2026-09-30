@@ -9,9 +9,19 @@ import yaml
 load_dotenv()
 
 
+def _resolve_default_config_path() -> Path:
+    default_path = Path("config.yaml")
+    try:
+        if default_path.resolve().parent == Path("/"):
+            return Path.home() / ".evren" / "config.yaml"
+    except Exception:
+        return Path.home() / ".evren" / "config.yaml"
+    return default_path
+
+
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load configuration from config.yaml or return sensible defaults."""
-    default_path = Path("config.yaml")
+    default_path = _resolve_default_config_path()
     target_path = Path(config_path) if config_path else default_path
 
     if target_path.exists():
@@ -55,8 +65,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
 def save_config(config_data: Dict[str, Any], config_path: Optional[str] = None) -> Path:
     """Save configuration dictionary back to YAML file."""
-    default_path = Path("config.yaml")
+    default_path = _resolve_default_config_path()
     target_path = Path(config_path) if config_path else default_path
+    target_path.parent.mkdir(parents=True, exist_ok=True)
     with open(target_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(config_data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
     return target_path

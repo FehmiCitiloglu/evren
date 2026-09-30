@@ -54,12 +54,38 @@ class SkillDict(dict):
         return super().pop(resolved, *args)
 
 
+def _resolve_safe_skills_dir(skills_dir: Optional[Union[str, Path]] = None) -> Path:
+    target = Path(skills_dir or "skills")
+    try:
+        resolved = target.resolve()
+        if resolved.parent == Path("/"):
+            return Path.home() / ".evren" / "skills"
+        return resolved
+    except Exception:
+        return Path.home() / ".evren" / "skills"
+
+
 class SkillManager:
     """Manages skill discovery, dynamic creation, and prompt injection."""
 
     def __init__(self, skills_dir: Optional[Union[str, Path]] = None):
-        self.skills_dir = Path(skills_dir or "skills").resolve()
-        self.skills_dir.mkdir(parents=True, exist_ok=True)
+        self.skills_dir = _resolve_safe_skills_dir(skills_dir)
+        try:
+            self.skills_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            fallback = Path.home() / ".evren" / "skills"
+            if self.skills_dir != fallback:
+                logger.warning(
+                    "Failed to create skills directory at %s (%s). Falling back to %s",
+                    self.skills_dir, e, fallback,
+                )
+                self.skills_dir = fallback
+                try:
+                    self.skills_dir.mkdir(parents=True, exist_ok=True)
+                except OSError as err_fb:
+                    logger.warning("Failed to create fallback skills directory %s: %s", fallback, err_fb)
+            else:
+                logger.warning("Failed to create skills directory %s: %s", self.skills_dir, e)
         self.skills: Dict[str, Skill] = SkillDict()
 
     def discover_skills(self, additional_dirs: Optional[List[Union[str, Path]]] = None) -> int:

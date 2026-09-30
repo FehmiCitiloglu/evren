@@ -14,13 +14,39 @@ from evren_agent.plugins.builtins.web_search import WebSearchPlugin
 logger = logging.getLogger(__name__)
 
 
+def _resolve_safe_plugins_dir(plugins_dir: Optional[Union[str, Path]] = None) -> Path:
+    target = Path(plugins_dir or "plugins")
+    try:
+        resolved = target.resolve()
+        if resolved.parent == Path("/"):
+            return Path.home() / ".evren" / "plugins"
+        return resolved
+    except Exception:
+        return Path.home() / ".evren" / "plugins"
+
+
 class PluginManager:
     """Manages plugin discovery, lifecycle hooks execution, and plugin tool registration."""
 
     def __init__(self, tool_registry: ToolRegistry, plugins_dir: Optional[Union[str, Path]] = None):
         self.tool_registry = tool_registry
-        self.plugins_dir = Path(plugins_dir or "plugins").resolve()
-        self.plugins_dir.mkdir(parents=True, exist_ok=True)
+        self.plugins_dir = _resolve_safe_plugins_dir(plugins_dir)
+        try:
+            self.plugins_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            fallback = Path.home() / ".evren" / "plugins"
+            if self.plugins_dir != fallback:
+                logger.warning(
+                    "Failed to create plugins directory at %s (%s). Falling back to %s",
+                    self.plugins_dir, e, fallback,
+                )
+                self.plugins_dir = fallback
+                try:
+                    self.plugins_dir.mkdir(parents=True, exist_ok=True)
+                except OSError as err_fb:
+                    logger.warning("Failed to create fallback plugins directory %s: %s", fallback, err_fb)
+            else:
+                logger.warning("Failed to create plugins directory %s: %s", self.plugins_dir, e)
         self.plugins: Dict[str, BasePlugin] = {}
 
     def register_plugin(self, plugin: BasePlugin) -> None:

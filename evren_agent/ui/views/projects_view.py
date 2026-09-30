@@ -965,6 +965,8 @@ class ProjectsView(ctk.CTkFrame):
             )
             session.model = settings.coding_model or self.service.default_model
         project = db.get_project(project_id)
+        if project and getattr(project, "local_path", None):
+            self.service.get_agent().default_cwd = project.local_path
         workspace_hint = f"\nProject workspace path: {project.local_path}\nUse this absolute path as cwd for project commands."
         if workspace_hint not in session.system_prompt:
             session.system_prompt += workspace_hint
