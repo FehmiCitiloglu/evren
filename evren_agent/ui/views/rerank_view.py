@@ -14,6 +14,9 @@ import customtkinter as ctk
 from evren_agent.ui.service import EvrenService
 
 
+DEFAULT_RERANK_MODEL = "qwen3-reranker-8b"
+
+
 class RerankView(ctk.CTkFrame):
     """Doküman Yeniden Sıralama Görünümü."""
 
@@ -58,10 +61,10 @@ class RerankView(ctk.CTkFrame):
 
         self.model_combo = ctk.CTkComboBox(
             controls_frame,
-            values=["bge-reranker-large"],
+            values=[DEFAULT_RERANK_MODEL],
             width=180,
         )
-        self.model_combo.set("bge-reranker-large")
+        self.model_combo.set(DEFAULT_RERANK_MODEL)
         self.model_combo.pack(side="left", padx=4, pady=8)
 
         self.start_btn = ctk.CTkButton(
@@ -167,7 +170,7 @@ class RerankView(ctk.CTkFrame):
             messagebox.showwarning("Eksik Belge", "Lütfen en az bir belge metni giriniz.")
             return
 
-        model = self.model_combo.get().strip() or "bge-reranker-large"
+        model = self.model_combo.get().strip() or DEFAULT_RERANK_MODEL
         self.is_processing = True
         self.start_btn.configure(state="disabled", text="Hesaplanıyor...")
         self.status_lbl.configure(text="Belgeler puanlanıyor...", text_color="#38bdf8")
