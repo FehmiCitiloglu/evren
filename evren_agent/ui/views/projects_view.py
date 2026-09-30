@@ -15,6 +15,8 @@ import uuid
 
 import customtkinter as ctk
 
+from evren_agent.core.events import AgentEventType
+from evren_agent.projects.context_builder import ProjectContextBuilder
 from evren_agent.projects.analyzer import detect_tech_stack
 from evren_agent.projects.git_service import GitService
 from evren_agent.projects.models import (
@@ -47,6 +49,7 @@ class ProjectsView(ctk.CTkFrame):
         self.service = service
         self.project_service: ProjectService = getattr(service, "projects", None) or ProjectService()
 
+        self._coding_states: Dict[str, Dict[str, Any]] = {}
         self.current_project_id: Optional[str] = None
         self.view_mode: str = "Grid"  # Grid, List, Recent, Favorites, Archived
         self.active_workspace_tab: str = "overview"
@@ -567,7 +570,7 @@ class ProjectsView(ctk.CTkFrame):
         back_btn.grid(row=0, column=0, padx=12, pady=10)
 
         title_box = ctk.CTkFrame(header, fg_color="transparent")
-        title_box.grid(row=0, column=1, sticky="w", padx=6, pady=10)
+        title_box.grid(row=0, column=1, sticky="ew", padx=6, pady=10)
 
         title_line = ctk.CTkLabel(
             title_box,
@@ -591,10 +594,11 @@ class ProjectsView(ctk.CTkFrame):
             font=ctk.CTkFont(size=10),
             text_color=("gray50", "#64748b"),
         )
-        path_lbl.pack(side="left")
+        path_lbl.pack(anchor="w")
+        title_box.bind("<Configure>", lambda e: path_lbl.configure(wraplength=max(80, e.width - 12)))
 
         actions_box = ctk.CTkFrame(header, fg_color="transparent")
-        actions_box.grid(row=0, column=2, sticky="e", padx=12, pady=10)
+        actions_box.grid(row=1, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 8))
 
         # Quick Add Button
         quick_add_btn = ctk.CTkButton(
@@ -666,8 +670,15 @@ class ProjectsView(ctk.CTkFrame):
                 corner_radius=6,
                 command=lambda t=tid: self._switch_workspace_tab(t),
             )
-            btn.pack(side="left", padx=2)
+            btn.configure(width=130)
             self.tab_buttons[tid] = btn
+
+        def layout_tabs(event):
+            columns = max(1, event.width // 134)
+            for index, button in enumerate(self.tab_buttons.values()):
+                button.grid(row=index // columns, column=index % columns, padx=2, pady=2, sticky="ew")
+        sub_nav.bind("<Configure>", layout_tabs)
+        layout_tabs(type("Size", (), {"width": 700})())
 
         # Alt Ana Çalışma Alanı Paneli
         self.workspace_body = ctk.CTkFrame(self.workspace_container, fg_color="transparent")
@@ -690,6 +701,9 @@ class ProjectsView(ctk.CTkFrame):
         for w in self.workspace_body.winfo_children():
             w.destroy()
 
+        for column in range(3):
+            self.workspace_body.grid_columnconfigure(column, weight=0, minsize=0)
+        self.workspace_body.grid_columnconfigure(0, weight=1)
         tab = self.active_workspace_tab
         if tab == "overview":
             self._render_tab_overview(self.workspace_body)
@@ -803,12 +817,12 @@ class ProjectsView(ctk.CTkFrame):
 
     def _render_tab_coding(self, container: Any) -> None:
         p = self.project_service.db.get_project(self.current_project_id)
-        container.grid_columnconfigure(0, weight=1)
-        container.grid_columnconfigure(1, weight=3)
-        container.grid_columnconfigure(2, weight=1)
+        container.grid_columnconfigure(0, weight=0)
+        container.grid_columnconfigure(1, weight=1)
+        container.grid_columnconfigure(2, weight=0)
 
         # SOL PANE: Dosya Ağacı / Listesi
-        left_pane = ctk.CTkFrame(container, fg_color=("gray92", "#161f2e"), corner_radius=10)
+        left_pane = ctk.CTkFrame(container, width=160, fg_color=("gray92", "#161f2e"), corner_radius=10)
         left_pane.grid(row=0, column=0, sticky="nsew", padx=(0, 4), pady=4)
         left_pane.grid_columnconfigure(0, weight=1)
         left_pane.grid_rowconfigure(1, weight=1)
@@ -816,7 +830,7 @@ class ProjectsView(ctk.CTkFrame):
         f_lbl = ctk.CTkLabel(left_pane, text="📂 Dosyalar", font=ctk.CTkFont(size=12, weight="bold"), text_color="#38bdf8")
         f_lbl.grid(row=0, column=0, sticky="w", padx=12, pady=8)
 
-        files_scroll = ctk.CTkScrollableFrame(left_pane, fg_color="transparent")
+        files_scroll = ctk.CTkScrollableFrame(left_pane, width=130, fg_color="transparent")
         files_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
 
         if p and Path(p.local_path).exists():
@@ -842,7 +856,9 @@ class ProjectsView(ctk.CTkFrame):
         # Chat / Plan Textbox
         self.coding_chat_box = ctk.CTkTextbox(mid_pane, font=ctk.CTkFont(size=12), wrap="word")
         self.coding_chat_box.grid(row=1, column=0, sticky="nsew", padx=12, pady=4)
-        self.coding_chat_box.insert("end", "=== EVREN CODING AGENT WORKSPACE ===\n\nBir görevi seçip 'Ajan ile Başlat' diyebilir veya doğrudan talimat yazabilirsiniz.\n")
+        state = self._coding_state()
+        self.coding_chat_box.insert("end", state["text"])
+        self._coding_rendered_text = state["text"]
 
         # Input Area
         input_box = ctk.CTkFrame(mid_pane, fg_color="transparent")
@@ -852,17 +868,21 @@ class ProjectsView(ctk.CTkFrame):
         self.coding_input = ctk.CTkEntry(input_box, placeholder_text="Ajan talimatı yazın (örn: 'Bu görev için plan oluştur ve uygula')...", height=34)
         self.coding_input.grid(row=0, column=0, sticky="ew", padx=(0, 6))
 
-        send_btn = ctk.CTkButton(
+        self.coding_input.bind("<Return>", self._handle_coding_return)
+        self.coding_input.bind("<KP_Enter>", self._handle_coding_return)
+        self.coding_send_btn = ctk.CTkButton(
             input_box,
             text="Gönder",
             width=80,
             height=34,
             command=self._send_coding_prompt,
         )
-        send_btn.grid(row=0, column=1)
+        self.coding_send_btn.grid(row=0, column=1)
+        self.coding_send_btn.configure(state="disabled" if state["busy"] else "normal",
+                                       text="Bekleyin…" if state["busy"] else "Gönder")
 
         # SAĞ PANE: Bağlam (Context Panel)
-        right_pane = ctk.CTkFrame(container, fg_color=("gray92", "#161f2e"), corner_radius=10)
+        right_pane = ctk.CTkFrame(container, width=180, fg_color=("gray92", "#161f2e"), corner_radius=10)
         right_pane.grid(row=0, column=2, sticky="nsew", padx=(4, 0), pady=4)
         right_pane.grid_columnconfigure(0, weight=1)
         right_pane.grid_rowconfigure(1, weight=1)
@@ -870,7 +890,7 @@ class ProjectsView(ctk.CTkFrame):
         ctx_lbl = ctk.CTkLabel(right_pane, text="🎯 Aktif Bağlam", font=ctk.CTkFont(size=12, weight="bold"), text_color="#38bdf8")
         ctx_lbl.grid(row=0, column=0, sticky="w", padx=12, pady=8)
 
-        ctx_scroll = ctk.CTkScrollableFrame(right_pane, fg_color="transparent")
+        ctx_scroll = ctk.CTkScrollableFrame(right_pane, width=150, fg_color="transparent")
         ctx_scroll.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
 
         # Instructions count
@@ -889,13 +909,125 @@ class ProjectsView(ctk.CTkFrame):
         g_lbl = ctk.CTkLabel(ctx_scroll, text=f"🌿 Git Değişiklik: {mod_count} dosya", font=ctk.CTkFont(size=11), anchor="w")
         g_lbl.pack(fill="x", padx=4, pady=4)
 
-    def _send_coding_prompt(self) -> None:
+        def layout_panes(event):
+            compact = event.width < 1000
+            if compact:
+                left_pane.grid_remove()
+                right_pane.grid_remove()
+                mid_pane.grid(column=0, columnspan=3, padx=0)
+            else:
+                left_pane.grid()
+                right_pane.grid()
+                mid_pane.grid(column=1, columnspan=1, padx=4)
+        mid_pane.bind("<Configure>", lambda e: layout_panes(type("Size", (), {"width": container.winfo_width()})()))
+        layout_panes(type("Size", (), {"width": container.winfo_width()})())
+
+
+    def _coding_state(self) -> Dict[str, Any]:
+        if self.current_project_id not in self._coding_states:
+            self._coding_states[self.current_project_id] = {
+                "session": self.service.get_or_create_session(None), "busy": False,
+                "text": "=== EVREN CODING AGENT WORKSPACE ===\n\nBir görevi seçip 'Ajan ile Başlat' diyebilir veya doğrudan talimat yazabilirsiniz.\n",
+            }
+        return self._coding_states[self.current_project_id]
+
+    def _handle_coding_return(self, event=None) -> str:
+        self.coding_send_btn.invoke()
+        return "break"
+
+    def _send_coding_prompt(self, event=None) -> str:
         txt = self.coding_input.get().strip()
-        if not txt:
+        if txt and not self._coding_state()["busy"]:
+            self.coding_input.delete(0, "end")
+            self._run_coding_prompt(txt)
+        return "break"
+
+    def _run_coding_prompt(self, prompt: str, prepared=None) -> None:
+        project_id = self.current_project_id
+        state = self._coding_state()
+        if state["busy"]:
             return
-        self.coding_chat_box.insert("end", f"\n[Siz]: {txt}\n")
-        self.coding_input.delete(0, "end")
-        self.coding_chat_box.insert("end", "[evren]: Talimat analiz ediliyor...\n")
+        session = state["session"]
+        db = self.project_service.db
+        settings = db.get_settings(project_id)
+        if prepared:
+            session.system_prompt = prepared["system_prompt"]
+            session.model = prepared["model"] or self.service.default_model
+        elif not session.messages:
+            builder = ProjectContextBuilder(
+                project=db.get_project(project_id), settings=settings,
+                instructions=db.list_instructions(project_id),
+                memories=db.list_memories(project_id), adrs=db.list_adrs(project_id),
+            )
+            session.system_prompt = builder.assemble_system_prompt(
+                "You are the Evren Coding Agent. Answer in Turkish. Use the project path "
+                "as cwd for project commands. Inspect, implement, verify and summarize the requested work."
+            )
+            session.model = settings.coding_model or self.service.default_model
+        project = db.get_project(project_id)
+        workspace_hint = f"\nProject workspace path: {project.local_path}\nUse this absolute path as cwd for project commands."
+        if workspace_hint not in session.system_prompt:
+            session.system_prompt += workspace_hint
+        state["busy"] = True
+        state["text"] += f"\n[Siz]: {prompt}\n[evren]: "
+        chunks = []
+        ended = False
+
+        def refresh():
+            if (self.current_project_id == project_id and self.active_workspace_tab == "coding"
+                    and self.coding_chat_box.winfo_exists()):
+                previous = self._coding_rendered_text
+                if state["text"].startswith(previous):
+                    self.coding_chat_box.insert("end", state["text"][len(previous):])
+                else:
+                    self.coding_chat_box.delete("1.0", "end")
+                    self.coding_chat_box.insert("end", state["text"])
+                self._coding_rendered_text = state["text"]
+                self.coding_chat_box.see("end")
+                self.coding_send_btn.configure(state="disabled" if state["busy"] else "normal",
+                                       text="Bekleyin…" if state["busy"] else "Gönder")
+
+        def finish(text):
+            nonlocal ended
+            if ended:
+                return
+            ended = True
+            if text and not chunks:
+                state["text"] += text
+            elif not chunks and not text:
+                state["text"] += "Yanıt metni alınamadı. Model ve bağlantı ayarlarını kontrol edin."
+            state["text"] += "\n"
+            state["busy"] = False
+            refresh()
+
+        def on_event(evt):
+            if ended:
+                return
+            if evt.type == AgentEventType.TEXT_DELTA and evt.content:
+                chunks.append(evt.content)
+                state["text"] += evt.content
+                refresh()
+            elif evt.type == AgentEventType.TOOL_CALL_STARTED:
+                state["text"] += f"\n[Araç: {evt.tool_name}]\n"
+                refresh()
+            elif evt.type in (AgentEventType.ERROR, AgentEventType.TOOL_CALL_ERROR, AgentEventType.MCP_ERROR):
+                state["text"] += f"\nHata: {evt.content}\n"
+                if evt.type == AgentEventType.ERROR:
+                    finish("")
+                else:
+                    refresh()
+            elif evt.type == AgentEventType.DONE:
+                finish(evt.content)
+
+        refresh()
+        try:
+            self.service.chat_agent_stream_async(
+                session_id=session.session_id, prompt=prompt,
+                on_event=on_event, on_done=finish,
+                on_error=lambda error: finish(f"Hata: {error}"),
+            )
+        except Exception as error:
+            finish(f"Hata: {error}")
 
     # =========================================================================
     # TAB: GÖREVLER & KANBAN (TASKS)
@@ -968,13 +1100,16 @@ class ProjectsView(ctk.CTkFrame):
         agent_btn.pack(fill="x", padx=8, pady=(4, 6))
 
     def _start_task_with_agent(self, task_id: str) -> None:
+        if self._coding_state()["busy"]:
+            return
         agent_prompt_data = self.project_service.coding.prepare_task_agent_prompt(self.current_project_id, task_id)
         self._switch_workspace_tab("coding")
         self.coding_chat_box.delete("1.0", "end")
         self.coding_chat_box.insert("end", f"=== GÖREV BAŞLATILDI: {agent_prompt_data['task'].title} ===\n\n")
         self.coding_chat_box.insert("end", f"Sistem Bağlamı:\n{agent_prompt_data['system_prompt'][:400]}...\n\n")
         self.coding_chat_box.insert("end", f"Kullanıcı İstemi:\n{agent_prompt_data['user_prompt']}\n\n")
-        self.coding_chat_box.insert("end", "[evren]: Görev bağlamı yüklendi. Adım adım plan hazırlanıyor...\n")
+        self._coding_state()["text"] = self.coding_chat_box.get("1.0", "end-1c")
+        self._run_coding_prompt(agent_prompt_data["user_prompt"], prepared=agent_prompt_data)
 
     # =========================================================================
     # TAB: ÖZELLİKLER (FEATURES)

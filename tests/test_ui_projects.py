@@ -18,6 +18,8 @@ def test_projects_view_full_lifecycle(monkeypatch):
         (tmp_path / "main.py").write_text("class TestClass:\n    pass\n")
 
         app = EvrenApp()
+        streams = []
+        monkeypatch.setattr(app.service, "chat_agent_stream_async", lambda **kwargs: streams.append(kwargs))
         try:
             # 1. Switch to projects view
             app.show_view("projects")
@@ -61,6 +63,50 @@ def test_projects_view_full_lifecycle(monkeypatch):
             pv._start_task_with_agent(tasks[0].id)
             assert pv.active_workspace_tab == "coding"
             assert "GÖREV BAŞLATILDI" in pv.coding_chat_box.get("1.0", "end")
+
+            assert len(streams) == 1
+            from evren_agent.core.events import AgentEvent, AgentEventType
+            call = streams[-1]
+            call["on_event"](AgentEvent(session_id=call["session_id"], type=AgentEventType.TEXT_DELTA, content="Plan hazır."))
+            call["on_event"](AgentEvent(session_id=call["session_id"], type=AgentEventType.DONE, content="Plan hazır."))
+            call["on_done"]("Plan hazır.")
+            assert pv.coding_chat_box.get("1.0", "end").count("Plan hazır.") == 1
+            assert not pv._coding_state()["busy"]
+            pv.coding_input.insert(0, "Devam et")
+            app.update()
+            pv.coding_input.focus_force()
+            app.update()
+            app.focus_get().event_generate("<Return>")
+            app.update()
+            assert len(streams) == 2
+            assert pv.coding_input.get() == ""
+            pv.coding_input.insert(0, "Bekleyen talimat")
+            app.focus_get().event_generate("<Return>")
+            app.update()
+            assert len(streams) == 2
+            assert pv.coding_input.get() == "Bekleyen talimat"
+            assert streams[-1]["session_id"] == call["session_id"]
+            pv._switch_workspace_tab("overview")
+            streams[-1]["on_error"]("Bağlantı kesildi")
+            pv._switch_workspace_tab("coding")
+            assert "Bağlantı kesildi" in pv.coding_chat_box.get("1.0", "end")
+            assert not pv._coding_state()["busy"]
+            pv.coding_input.insert(0, "Sayısal Enter")
+            pv.coding_input.focus_force()
+            app.update()
+            app.focus_get().event_generate("<KP_Enter>")
+            app.update()
+            assert len(streams) == 3
+            assert streams[-1]["prompt"] == "Sayısal Enter"
+            streams[-1]["on_done"]("Tamamlandı")
+            for width in (940, 1120, 1600):
+                app.geometry(f"{width}x760")
+                app.update()
+                app.update_idletasks()
+                assert pv.coding_input.winfo_width() > 150
+                assert pv.coding_send_btn.winfo_rootx() + pv.coding_send_btn.winfo_width() <= app.winfo_rootx() + app.winfo_width()
+                for button in pv.tab_buttons.values():
+                    assert button.winfo_rootx() + button.winfo_width() <= app.winfo_rootx() + app.winfo_width()
 
             # 7. Test PM Check action
             pv._run_pm_check_action()
