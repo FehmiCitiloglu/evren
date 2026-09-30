@@ -48,7 +48,7 @@ VARSAYILAN_MODELLER = [
     "deepseek-r1",
     "dots-ocr",
     "qwen3-asr-1.7b",
-    "bge-reranker-large",
+    "qwen3-reranker-8b",
 ]
 
 
