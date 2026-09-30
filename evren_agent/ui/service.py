@@ -771,6 +771,7 @@ class EvrenService:
         session_id: str,
         prompt: str,
         image_path: Optional[str] = None,
+        cwd: Optional[str] = None,
         on_event: Optional[Callable[[AgentEvent], None]] = None,
         on_done: Optional[Callable[[str], None]] = None,
         on_error: Optional[Callable[[str], None]] = None,
@@ -784,6 +785,8 @@ class EvrenService:
         async def run():
             session = self.get_or_create_session(session_id)
             agent = self.get_agent()
+            if cwd:
+                agent.default_cwd = cwd
             await agent.initialize()
 
             # Acquire/connect active MCPs for this session

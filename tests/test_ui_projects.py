@@ -76,12 +76,14 @@ def test_projects_view_full_lifecycle(monkeypatch):
             app.update()
             pv.coding_input.focus_force()
             app.update()
-            app.focus_get().event_generate("<Return>")
+            focused = app.focus_get() or getattr(pv.coding_input, "_entry", pv.coding_input)
+            focused.event_generate("<Return>")
             app.update()
             assert len(streams) == 2
             assert pv.coding_input.get() == ""
             pv.coding_input.insert(0, "Bekleyen talimat")
-            app.focus_get().event_generate("<Return>")
+            focused = app.focus_get() or getattr(pv.coding_input, "_entry", pv.coding_input)
+            focused.event_generate("<Return>")
             app.update()
             assert len(streams) == 2
             assert pv.coding_input.get() == "Bekleyen talimat"
@@ -91,13 +93,15 @@ def test_projects_view_full_lifecycle(monkeypatch):
             pv._switch_workspace_tab("coding")
             assert "Bağlantı kesildi" in pv.coding_chat_box.get("1.0", "end")
             assert not pv._coding_state()["busy"]
+            pv.coding_input.delete(0, "end")
             pv.coding_input.insert(0, "Sayısal Enter")
             pv.coding_input.focus_force()
             app.update()
             # Windows Tk maps both Enter keys to Return; KP_Enter has no native
             # keycode there, so generating it does not dispatch a key event.
             keypad_enter = "<Return>" if app.tk.call("tk", "windowingsystem") == "win32" else "<KP_Enter>"
-            app.focus_get().event_generate(keypad_enter)
+            focused = app.focus_get() or getattr(pv.coding_input, "_entry", pv.coding_input)
+            focused.event_generate(keypad_enter)
             app.update()
             assert len(streams) == 3
             assert streams[-1]["prompt"] == "Sayısal Enter"
@@ -121,4 +125,6 @@ def test_projects_view_full_lifecycle(monkeypatch):
             assert pv.list_container.winfo_ismapped() or pv.list_container.winfo_manager() != ""
 
         finally:
+            if hasattr(app, "service") and hasattr(app.service, "projects") and hasattr(app.service.projects, "scheduler"):
+                app.service.projects.scheduler.stop()
             app.destroy()
