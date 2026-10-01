@@ -5,7 +5,7 @@ import customtkinter as ctk
 import pytest
 
 from evren_agent.core.events import AgentEventType
-from evren_agent.ui.components.markdown_message import MarkdownMessage
+from evren_agent.ui.components.markdown_message import MarkdownMessage, _TextBlock
 from evren_agent.ui.theme import THEME_COLORS
 from test_ui_chat import chat, emit, messages, pump, send
 
@@ -131,6 +131,28 @@ def test_reopened_history_renders_original_markdown(chat):
     assert bot.text_label.code_sources == ["echo merhaba\n"]
     assert not view.is_streaming
     assert len(service.streams) == 1
+
+
+def test_delayed_native_layout_keeps_last_markdown_line_visible(chat, monkeypatch):
+    root, view, service = chat
+    root.geometry("660x760")
+    stream = send(view, service)
+    pump(root, 0.16)
+
+    def delayed_fit(block):
+        if block._fit_job is None:
+            block._fit_job = block.after(120, block._fit)
+
+    monkeypatch.setattr(_TextBlock, "schedule_fit", delayed_fit)
+    source = "## Geciken yerleşim\n\n```python\n" + "print('satır')\n" * 12 + "```\n\n**Son satır**"
+    emit(root, stream, AgentEventType.DONE, content=source)
+    pump(root, 0.55)
+    renderer = view.current_bot_bubble.text_label
+    assert displayed(renderer).endswith("Son satır")
+    canvas = view.chat_scroll._parent_canvas
+    last = renderer.blocks[-1]
+    assert canvas.yview()[1] > 0.99
+    assert last.winfo_rooty() + last.winfo_height() <= canvas.winfo_rooty() + canvas.winfo_height()
 
 
 def test_links_require_click_and_html_images_remain_text(chat, monkeypatch):

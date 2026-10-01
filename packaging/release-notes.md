@@ -1,4 +1,4 @@
-## v0.2.11 değişiklikleri
+## v0.2.12 değişiklikleri
 
 - Model yanıtları Markdown olarak gösterilir: başlıklar, kalın/italik metin, listeler, alıntılar ve bağlantılar biçimlendirilir.
 - Kod bloklarında dil etiketi ve ayrı kopyalama düğmesi bulunur; geniş kod ve tablolar yatay kaydırılabilir.

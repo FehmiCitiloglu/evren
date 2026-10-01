@@ -786,6 +786,8 @@ class ChatView(ctk.CTkFrame):
         row.bind("<Configure>", resize, add="+")
         if isinstance(bubble.text_label, MarkdownMessage):
             bubble.text_label.on_render = self._scroll_to_bottom
+            bubble.text_label.get_scroll_anchor = self._capture_scroll_anchor
+            bubble.text_label.on_layout = lambda top: self._scroll_to_bottom(layout_top=top)
         return bubble
 
     def _on_send_pressed(self) -> None:
@@ -983,15 +985,22 @@ class ChatView(ctk.CTkFrame):
             target = max(top, bottom - viewport)
         canvas.yview_moveto(max(0, target - bounds[1]) / max(1, bounds[3] - bounds[1]))
 
-    def _scroll_to_bottom(self, force: bool = False) -> None:
+    def _capture_scroll_anchor(self) -> Optional[float]:
+        canvas = self.chat_scroll._parent_canvas
+        return canvas.canvasy(0) if canvas.yview()[1] >= 0.97 else None
+
+    def _scroll_to_bottom(self, force: bool = False, *, layout_top: Optional[float] = None) -> None:
         canvas = self.chat_scroll._parent_canvas
         self._scroll_force = self._scroll_force or force
         if self._scroll_job is not None:
             return
         # Geçmişi okuyan kullanıcıyı yeni olay geldiğinde aşağı çekme.
-        if not force and canvas.yview()[1] < 0.97:
+        if not force and layout_top is None and canvas.yview()[1] < 0.97:
             return
-        previous_top = canvas.canvasy(0)
+        # Markdown blocks finish measuring after rendering. Retain the reading
+        # position captured before that layout grew, including native resize
+        # events that arrive after the initial scroll timer has already fired.
+        previous_top = canvas.canvasy(0) if layout_top is None else layout_top
 
         def scroll() -> None:
             self._scroll_job = None

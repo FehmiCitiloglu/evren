@@ -16,11 +16,12 @@ from evren_agent.ui.theme import THEME_COLORS
 class _TextBlock(ctk.CTkTextbox):
     """Grow to the text's display height; the conversation owns vertical scrolling."""
 
-    def __init__(self, master, *, fixed_width=False):
+    def __init__(self, master, *, fixed_width=False, on_layout=None):
         self._after_jobs = set()
         self._fit_job = None
         self._last_width = None
         self.fixed_width = fixed_width
+        self.on_layout = on_layout
         self.styles = {}
         super().__init__(master, width=1, height=24, corner_radius=0,
                          border_spacing=0, fg_color="transparent",
@@ -55,11 +56,15 @@ class _TextBlock(ctk.CTkTextbox):
 
     def schedule_fit(self):
         if self._fit_job is None:
-            self._fit_job = self.after_idle(self._fit)
+            # Run after native Text layout, outside scrollbar idle callbacks.
+            self._fit_job = self.after(1, self._fit)
 
     def _fit(self):
         self._fit_job = None
-        pixels = self._textbox.count("1.0", "end", "update", "ypixels")
+        # Tk's -update flag reenters idle callbacks while measuring. A scrollbar
+        # callback can replace/destroy this block in that nested loop (Aqua Tk
+        # 8.6 / Python 3.10 can crash). Measure settled geometry without reentry.
+        pixels = self._textbox.count("1.0", "end", "ypixels")
         if pixels:
             pixels = pixels[0] if isinstance(pixels, tuple) else pixels
             # Include Text's padding/border and round up at fractional DPI.
@@ -68,6 +73,8 @@ class _TextBlock(ctk.CTkTextbox):
                 height += 18  # Leave space for a horizontal scrollbar.
             if height != self.cget("height"):
                 self.configure(height=height)
+            if self.on_layout:
+                self.on_layout()
 
     def style(self, names):
         key = "+".join(sorted(set(names))) or "body"
@@ -135,6 +142,9 @@ class MarkdownMessage(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent", width=1, height=1)
         self.source = text
         self.on_render = on_render
+        self.get_scroll_anchor = None
+        self.on_layout = None
+        self._scroll_anchor = None
         self._render_job = None
         self._parser = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
         self.blocks = []
@@ -153,10 +163,15 @@ class MarkdownMessage(ctk.CTkFrame):
             self._render()
 
     def _new_text(self, *, fixed_width=False, master=None):
-        block = _TextBlock(master or self, fixed_width=fixed_width)
+        block = _TextBlock(master or self, fixed_width=fixed_width,
+                           on_layout=self._layout_changed)
         block.pack(fill="x", pady=(0, 6))
         self.blocks.append(block)
         return block
+
+    def _layout_changed(self):
+        if self.on_layout and self._scroll_anchor is not None:
+            self.on_layout(self._scroll_anchor)
 
     def _insert(self, block, text, names=(), extra=()):
         block._textbox.insert("end", text, (block.style(names), *extra))
@@ -255,6 +270,7 @@ class MarkdownMessage(ctk.CTkFrame):
 
     def _render(self):
         self._render_job = None
+        self._scroll_anchor = self.get_scroll_anchor() if self.get_scroll_anchor else None
         for child in self.winfo_children():
             child.destroy()
         self.blocks = []
