@@ -1,7 +1,6 @@
 """Desktop chat layout and event lifecycle regressions (requires a Tk display)."""
 import time
 import tempfile
-import gc
 from pathlib import Path
 
 import customtkinter as ctk
@@ -12,20 +11,6 @@ from evren_agent.core.chat_history import ChatHistoryStore
 from evren_agent.core.session import ChatSession
 from evren_agent.ui.app import _ensure_tk_environment
 from evren_agent.ui.views.chat_view import ChatMessageBubble, ChatView
-
-
-@pytest.fixture(scope="module", autouse=True)
-def collect_tk_objects_on_main_thread():
-    # Tk fonts in widget/binding cycles must not be collected by a later API
-    # worker. Collect them after all test roots have been destroyed instead.
-    enabled = gc.isenabled()
-    gc.disable()
-    try:
-        yield
-    finally:
-        gc.collect()
-        if enabled:
-            gc.enable()
 
 
 class ChatServiceStub:
@@ -88,6 +73,16 @@ def pump(root, seconds=0):
         if time.monotonic() >= end:
             break
         time.sleep(0.005)
+
+
+def wait_for_mapping(root, widget, timeout=1):
+    # Aqua delivers native resize/map events asynchronously after pack changes.
+    # Keep checking the actual visible widget instead of assuming update() has
+    # completed native window layout on every platform.
+    end = time.monotonic() + timeout
+    while not widget.winfo_ismapped() and time.monotonic() < end:
+        pump(root, 0.01)
+    assert widget.winfo_ismapped()
 
 
 @pytest.fixture
@@ -193,7 +188,7 @@ def test_activity_is_folded_and_complete_output_is_inspectable(chat):
     group.toggle_btn.invoke()
     pump(root)
     assert not tool.winfo_ismapped()
-    assert view.current_bot_bubble.text_label.winfo_ismapped()
+    wait_for_mapping(root, view.current_bot_bubble.text_label)
     group.toggle_btn.invoke()
     pump(root)
     assert tool.is_expanded

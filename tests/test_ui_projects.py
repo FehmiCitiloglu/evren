@@ -43,10 +43,11 @@ def test_projects_view_full_lifecycle(monkeypatch):
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
         (tmp_path / "main.py").write_text("class TestClass:\n    pass\n")
 
-        app = EvrenApp()
-        streams = []
-        monkeypatch.setattr(app.service, "chat_agent_stream_async", lambda **kwargs: streams.append(kwargs))
+        app = None
         try:
+            app = EvrenApp()
+            streams = []
+            monkeypatch.setattr(app.service, "chat_agent_stream_async", lambda **kwargs: streams.append(kwargs))
             # 1. Switch to projects view
             app.show_view("projects")
             assert app.active_tab == "projects"
@@ -153,7 +154,8 @@ def test_projects_view_full_lifecycle(monkeypatch):
         finally:
             if hasattr(app, "service") and hasattr(app.service, "projects") and hasattr(app.service.projects, "scheduler"):
                 app.service.projects.scheduler.stop()
-            app.destroy()
+            if app is not None:
+                app.destroy()
             monkeypatch.chdir(original_cwd)
 
 
