@@ -97,6 +97,28 @@ def test_cancelling_one_session_keeps_the_other_running(service, monkeypatch):
     second.result(timeout=3)
 
 
+def test_done_callback_can_send_next_question_without_old_cleanup_clearing_it(service, monkeypatch):
+    session = service.get_or_create_session()
+    agent = GatedAgent()
+    agent.release.set()
+    monkeypatch.setattr(service, "get_agent", lambda sid: agent)
+    service.save_chat_transcript(session, [{"role": "user", "content": "İlk soru"}])
+    following = []
+    def on_event(event):
+        if event.type == AgentEventType.DONE:
+            agent.release.clear()
+            following.append(service.chat_agent_stream_async(session.session_id, "İkinci soru"))
+    first = service.chat_agent_stream_async(session.session_id, "İlk soru", on_event=on_event)
+    first.result(timeout=3)
+    assert len(following) == 1
+    assert not following[0].done()
+    assert session.session_id in service._streams
+    assert service._stream_futures[session.session_id] is following[0]
+    agent.release.set()
+    following[0].result(timeout=3)
+    assert session.messages[-1].content.startswith("İkinci soru:")
+
+
 def test_desktop_agent_instances_do_not_share_bound_builtin_handlers(service):
     a, b = service.get_agent("a"), service.get_agent("b")
     assert a is not b

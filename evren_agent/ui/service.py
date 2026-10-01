@@ -900,6 +900,12 @@ class EvrenService:
                 raise ValueError("Bu sohbette bir yanıt zaten hazırlanıyor.")
             self._streams[session_id] = cancel_event
 
+        def release_stream(_=None):
+            with self._stream_lock:
+                if self._streams.get(session_id) is cancel_event:
+                    self._streams.pop(session_id, None)
+                    self._stream_futures.pop(session_id, None)
+
         async def run():
             session = self.get_or_create_session(session_id)
             agent = self.get_agent(session_id)
@@ -943,6 +949,7 @@ class EvrenService:
                 augmented_prompt = f"[User attached image at: {image_path}]\n{prompt}"
 
             final_text = ""
+            context_saved = False
             try:
                 async for evt in agent.run_stream(
                     prompt=augmented_prompt,
@@ -950,17 +957,26 @@ class EvrenService:
                     session_tool_filter=tool_filter,
                     cancel_event=cancel_event,
                 ):
+                    if evt.type == AgentEventType.DONE:
+                        # Finish persistence and release the session before the
+                        # UI enables Send. A completion callback may start the
+                        # next question immediately in this same conversation.
+                        await asyncio.to_thread(self.chat_history.save_context, session)
+                        context_saved = True
+                        release_stream()
                     if on_event:
                         self._dispatch(on_event, evt)
                     if evt.type == AgentEventType.DONE:
                         final_text = evt.content or ""
             finally:
-                await asyncio.to_thread(self.chat_history.save_context, session)
+                if not context_saved:
+                    await asyncio.to_thread(self.chat_history.save_context, session)
 
             if on_done:
                 self._dispatch(on_done, final_text)
 
         def _err(e: Exception):
+            release_stream()
             if on_error:
                 self._dispatch(on_error, str(e))
             elif on_done:
@@ -968,15 +984,10 @@ class EvrenService:
 
         future = self.runtime.submit(run(), on_error=_err)
         with self._stream_lock:
-            self._stream_futures[session_id] = future
+            if self._streams.get(session_id) is cancel_event:
+                self._stream_futures[session_id] = future
 
-        def cleanup(_):
-            with self._stream_lock:
-                if self._streams.get(session_id) is cancel_event:
-                    self._streams.pop(session_id, None)
-                    self._stream_futures.pop(session_id, None)
-
-        future.add_done_callback(cleanup)
+        future.add_done_callback(release_stream)
         return future
 
     def shutdown(self) -> None:
