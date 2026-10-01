@@ -22,6 +22,7 @@ from PIL import Image
 from evren_agent.core.events import AgentEvent, AgentEventType
 from evren_agent.core.session import ChatSession
 from evren_agent.ui.components.tool_card import ToolActivityGroup
+from evren_agent.ui.components.markdown_message import MarkdownMessage
 from evren_agent.ui.service import EvrenService
 from evren_agent.ui.theme import THEME_COLORS
 
@@ -128,10 +129,10 @@ class ChatMessageBubble(ctk.CTkFrame):
         **kwargs: Any,
     ) -> None:
         is_user = (role == "user")
-        theme_mode = ctk.get_appearance_mode().lower()
-        colors = THEME_COLORS.get(theme_mode, THEME_COLORS["dark"])
+        def color(name: str):
+            return THEME_COLORS["light"][name], THEME_COLORS["dark"][name]
 
-        bg_color = colors["user_bubble"] if is_user else colors["bot_bubble"]
+        bg_color = color("user_bubble" if is_user else "bot_bubble")
         fg_color = bg_color
 
         super().__init__(
@@ -139,7 +140,7 @@ class ChatMessageBubble(ctk.CTkFrame):
             fg_color=fg_color,
             corner_radius=12,
             border_width=1,
-            border_color=colors["border"],
+            border_color=color("border"),
             **kwargs,
         )
 
@@ -153,7 +154,7 @@ class ChatMessageBubble(ctk.CTkFrame):
         header_frame.grid(row=0, column=0, sticky="ew", padx=12, pady=(8, 4))
 
         sender_title = "Siz" if is_user else "evren"
-        sender_color = "#dbeafe" if is_user else colors["accent_secondary"]
+        sender_color = "#dbeafe" if is_user else color("accent_secondary")
         sender_label = ctk.CTkLabel(
             header_frame,
             text=sender_title,
@@ -166,7 +167,7 @@ class ChatMessageBubble(ctk.CTkFrame):
             header_frame,
             text=self.timestamp,
             font=ctk.CTkFont(size=11),
-            text_color="#dbeafe" if is_user else colors["text_secondary"],
+            text_color="#dbeafe" if is_user else color("text_secondary"),
         )
         time_label.pack(side="left", padx=8)
 
@@ -178,8 +179,8 @@ class ChatMessageBubble(ctk.CTkFrame):
             height=22,
             font=ctk.CTkFont(size=11),
             fg_color="transparent",
-            hover_color=colors["bg_hover"],
-            text_color="#ffffff" if is_user else colors["text_secondary"],
+            hover_color=color("bg_hover"),
+            text_color="#ffffff" if is_user else color("text_secondary"),
             command=self._copy_to_clipboard,
         )
         copy_btn.pack(side="right")
@@ -203,16 +204,14 @@ class ChatMessageBubble(ctk.CTkFrame):
                 err_lbl.grid(row=1, column=0, sticky="w", padx=12, pady=4)
 
         # Mesaj Metni
-        self.text_label = ctk.CTkLabel(
-            self,
-            text=content,
-            font=ctk.CTkFont(size=14),
-            text_color="#ffffff" if is_user else colors["text_primary"],
-            width=1,
-            wraplength=700,
-            justify="left",
-            anchor="w",
-        )
+        if is_user:
+            self.text_label = ctk.CTkLabel(
+                self, text=content, font=ctk.CTkFont(size=14),
+                text_color="#ffffff", width=1, wraplength=700,
+                justify="left", anchor="w",
+            )
+        else:
+            self.text_label = MarkdownMessage(self, text=content)
         self.text_label.grid(row=3, column=0, sticky="ew", padx=12, pady=(2, 10))
         self._wraplength = 700
         self.bind("<Configure>", self._resize_text, add="+")
@@ -221,12 +220,16 @@ class ChatMessageBubble(ctk.CTkFrame):
         width = max(40, int(event.width / self._get_widget_scaling()) - 24)
         if width != self._wraplength:
             self._wraplength = width
-            self.text_label.configure(wraplength=width)
+            if self.role == "user":
+                self.text_label.configure(wraplength=width)
 
-    def update_text(self, new_text: str) -> None:
+    def update_text(self, new_text: str, *, streaming: bool = False) -> None:
         """Akış sırasında metni dinamik günceller."""
         self.raw_content = new_text
-        self.text_label.configure(text=new_text)
+        if isinstance(self.text_label, MarkdownMessage):
+            self.text_label.set_text(new_text, streaming=streaming)
+        else:
+            self.text_label.configure(text=new_text)
 
     def _copy_to_clipboard(self) -> None:
         self.clipboard_clear()
@@ -781,6 +784,8 @@ class ChatView(ctk.CTkFrame):
                 bubble.pack_configure(padx=padding)
 
         row.bind("<Configure>", resize, add="+")
+        if isinstance(bubble.text_label, MarkdownMessage):
+            bubble.text_label.on_render = self._scroll_to_bottom
         return bubble
 
     def _on_send_pressed(self) -> None:
@@ -896,7 +901,7 @@ class ChatView(ctk.CTkFrame):
                         accumulated_chunks.append("\n\n")
                     text_before_tools = False
                     accumulated_chunks.append(evt.content)
-                    bot_bubble.update_text("".join(accumulated_chunks))
+                    bot_bubble.update_text("".join(accumulated_chunks), streaming=True)
                     bot_record["content"] = bot_bubble.raw_content
                     self._scroll_to_bottom()
 

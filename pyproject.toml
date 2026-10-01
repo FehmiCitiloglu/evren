@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "evren-agent"
-version = "0.2.10"
+version = "0.2.11"
 
 description = "EVREN public API CLI and Python client, with optional MCP/Skills/Plugins agent"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "markdown-it-py>=3.0",
     "httpx>=0.27.0",
     "rich>=13.0.0",
     "pyyaml>=6.0",

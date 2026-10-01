@@ -147,7 +147,7 @@ def test_message_alignment_wrap_and_panels_do_not_overlap(chat, tmp_path, monkey
             assert bot.winfo_x() == 0
             assert user.winfo_width() < user.master.winfo_width()
             assert bot.winfo_width() <= 800
-            assert bot.text_label.cget("wraplength") <= bot.winfo_width() - 20
+            assert bot.text_label.winfo_width() <= bot.winfo_width() - 20
             canvas = view.chat_scroll._parent_canvas
             assert canvas.winfo_rooty() + canvas.winfo_height() <= view.chips_frame.winfo_rooty()
             assert view.chips_frame.winfo_rooty() + view.chips_frame.winfo_height() <= view.img_tray.winfo_rooty()
@@ -213,7 +213,7 @@ def test_closing_older_activity_reveals_its_reply_instead_of_latest_turn(chat):
     emit(root, first, AgentEventType.DONE, content="İlk yanıt")
     older_bubble = view.current_bot_bubble
     second = send(view, service, "Devam")
-    emit(root, second, AgentEventType.TEXT_DELTA, content="Uzun yanıt\n" * 100)
+    emit(root, second, AgentEventType.TEXT_DELTA, content="Uzun yanıt  \n" * 100)
     emit(root, second, AgentEventType.DONE, content="Tamamlandı")
     pump(root, 0.08)
     group = next(child for child in older_bubble.winfo_children()
@@ -285,17 +285,17 @@ def test_cancel_and_clear_ignore_late_callbacks(chat):
 def test_stream_follows_bottom_but_preserves_reading_position(chat):
     root, view, service = chat
     stream = send(view, service)
-    emit(root, stream, AgentEventType.TEXT_DELTA, content="Satır\n" * 100)
-    pump(root, 0.08)
+    emit(root, stream, AgentEventType.TEXT_DELTA, content="Satır  \n" * 100)
+    pump(root, 0.16)
     canvas = view.chat_scroll._parent_canvas
     assert canvas.yview()[1] > 0.99
-    emit(root, stream, AgentEventType.TEXT_DELTA, content="Yeni satır\n" * 20)
-    pump(root, 0.08)
+    emit(root, stream, AgentEventType.TEXT_DELTA, content="Yeni satır  \n" * 20)
+    pump(root, 0.16)
     assert canvas.yview()[1] > 0.99
     canvas.yview_moveto(0.2)
     previous_top = canvas.canvasy(0)
-    emit(root, stream, AgentEventType.TEXT_DELTA, content="Son satır\n" * 20)
-    pump(root, 0.08)
+    emit(root, stream, AgentEventType.TEXT_DELTA, content="Son satır  \n" * 20)
+    pump(root, 0.16)
     assert abs(canvas.canvasy(0) - previous_top) <= 2
     assert canvas.yview()[1] < 0.8
     canvas.yview_moveto(1.0)
@@ -338,7 +338,7 @@ def test_activity_and_message_fit_with_display_scaling(chat, mode):
         pump(root)
         user, bot = messages(view)
         assert user.text_label.cget("text_color") == "#ffffff"
-        assert bot.text_label.cget("wraplength") * 1.25 <= bot.winfo_width() - 25
+        assert bot.text_label.winfo_width() <= bot.winfo_width() - 25
         assert group.tools[0].toggle_btn.winfo_rootx() + group.tools[0].toggle_btn.winfo_width() <= bot.winfo_rootx() + bot.winfo_width()
     finally:
         ctk.set_widget_scaling(1)
