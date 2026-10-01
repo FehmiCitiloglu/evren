@@ -7,7 +7,7 @@ import pytest
 from evren_agent.core.events import AgentEventType
 from evren_agent.ui.components.markdown_message import MarkdownMessage, _TextBlock
 from evren_agent.ui.theme import THEME_COLORS
-from test_ui_chat import chat, emit, messages, pump, send
+from test_ui_chat import chat, emit, messages, pump, send, wait_for_layout
 
 
 def displayed(renderer):
@@ -76,9 +76,16 @@ def test_code_and_wide_tables_fit_without_clipping_reply(chat, mode, scale):
         copy = next(w for w in header.winfo_children() if isinstance(w, ctk.CTkButton))
         copy.invoke()
         assert root.clipboard_get() == code
+        pump(root, 0.1)
         last = renderer.blocks[-1]
         canvas = view.chat_scroll._parent_canvas
-        assert last.winfo_rooty() + last.winfo_height() <= canvas.winfo_rooty() + canvas.winfo_height()
+        wait_for_layout(root, lambda: last.winfo_rooty() + last.winfo_height() <= canvas.winfo_rooty() + canvas.winfo_height(), diagnostics=lambda: {
+            "view": canvas.yview(), "region": canvas.cget("scrollregion"),
+            "bbox": canvas.bbox("all"), "offset": canvas.canvasy(0),
+            "chat": (view.chat_scroll.winfo_rooty(), view.chat_scroll.winfo_height()),
+            "reply": (bot.winfo_rooty(), bot.winfo_height()),
+            "blocks": [(b.winfo_rooty(), b.winfo_height()) for b in renderer.blocks],
+        })
     finally:
         ctk.set_widget_scaling(1)
         ctk.set_appearance_mode("Dark")

@@ -20,6 +20,7 @@ class _TextBlock(ctk.CTkTextbox):
         self._after_jobs = set()
         self._fit_job = None
         self._last_width = None
+        self._last_height = None
         self.fixed_width = fixed_width
         self.on_layout = on_layout
         self.styles = {}
@@ -53,6 +54,11 @@ class _TextBlock(ctk.CTkTextbox):
         if event.width != self._last_width:
             self._last_width = event.width
             self.schedule_fit()
+        elif event.height != self._last_height and self.on_layout:
+            # Native platforms can apply the measured height after the first
+            # scroll callback. Notify when that size is actually displayed.
+            self.on_layout()
+        self._last_height = event.height
 
     def schedule_fit(self):
         if self._fit_job is None:
@@ -152,6 +158,9 @@ class MarkdownMessage(ctk.CTkFrame):
         self._render()
 
     def set_text(self, text, *, streaming=False):
+        # Capture the viewport before changing content. Native layout may have
+        # grown the scroll region by the time a throttled render starts.
+        self._scroll_anchor = self.get_scroll_anchor() if self.get_scroll_anchor else None
         self.source = text
         if streaming:
             if self._render_job is None:
@@ -270,7 +279,6 @@ class MarkdownMessage(ctk.CTkFrame):
 
     def _render(self):
         self._render_job = None
-        self._scroll_anchor = self.get_scroll_anchor() if self.get_scroll_anchor else None
         for child in self.winfo_children():
             child.destroy()
         self.blocks = []

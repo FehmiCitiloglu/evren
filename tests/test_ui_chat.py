@@ -89,6 +89,13 @@ def wait_for_mapping(root, widget, timeout=1):
     assert widget.winfo_ismapped()
 
 
+def wait_for_layout(root, condition, timeout=1, diagnostics=None):
+    end = time.monotonic() + timeout
+    while not condition() and time.monotonic() < end:
+        pump(root, 0.01)
+    assert condition(), diagnostics() if diagnostics else "Native layout did not settle"
+
+
 @pytest.fixture
 def chat():
     _ensure_tk_environment()
@@ -288,10 +295,10 @@ def test_stream_follows_bottom_but_preserves_reading_position(chat):
     emit(root, stream, AgentEventType.TEXT_DELTA, content="Satır  \n" * 100)
     pump(root, 0.16)
     canvas = view.chat_scroll._parent_canvas
-    assert canvas.yview()[1] > 0.99
+    wait_for_layout(root, lambda: canvas.yview()[1] > 0.99)
     emit(root, stream, AgentEventType.TEXT_DELTA, content="Yeni satır  \n" * 20)
     pump(root, 0.16)
-    assert canvas.yview()[1] > 0.99
+    wait_for_layout(root, lambda: canvas.yview()[1] > 0.99)
     canvas.yview_moveto(0.2)
     previous_top = canvas.canvasy(0)
     emit(root, stream, AgentEventType.TEXT_DELTA, content="Son satır  \n" * 20)
