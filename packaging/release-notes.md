@@ -1,9 +1,10 @@
-## v0.2.13 değişiklikleri
+## v0.2.14 değişiklikleri
 
 - Model yanıtları Markdown olarak gösterilir: başlıklar, kalın/italik metin, listeler, alıntılar ve bağlantılar biçimlendirilir.
 - Kod bloklarında dil etiketi ve ayrı kopyalama düğmesi bulunur; geniş kod ve tablolar yatay kaydırılabilir.
 - Akış sırasında görünüm güncellemeleri birleştirilir; yanıt bittiğinde son biçimlendirme hemen uygulanır.
 - Sohbet geçmişi ve mesaj kopyalama orijinal Markdown metnini korur; yeniden açılan sohbetler aynı biçimde gösterilir.
+- Arka plan döngüsü tamamen başlamadan ilk MCP görevinin gönderilmesine yol açabilen açılış yarışı düzeltildi.
 
 ## v0.2.10 değişiklikleri
 

@@ -57,7 +57,10 @@ class AsyncRuntime:
     def _run_loop(self) -> None:
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-        self._ready_event.set()
+        # Signal from inside the running loop. Signalling before run_forever
+        # lets the constructor return while is_running is still false, so the
+        # desktop's first MCP autostart task can be rejected on a fast caller.
+        self._loop.call_soon(self._ready_event.set)
         logger.info("AsyncRuntime thread started.")
         try:
             self._loop.run_forever()
