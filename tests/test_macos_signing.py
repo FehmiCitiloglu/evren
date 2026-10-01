@@ -1,5 +1,6 @@
 """Credential validation and runner isolation; no real Apple credentials used."""
 import base64
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -49,7 +50,8 @@ def test_setup_preserves_search_list_and_isolates_notary_credentials(monkeypatch
         if args[:2] == ("security", "import"):
             certificate = Path(args[2])
             assert certificate.read_bytes() == b"fake-p12"
-            assert certificate.stat().st_mode & 0o777 == 0o600
+            if os.name == "posix":
+                assert certificate.stat().st_mode & 0o777 == 0o600
         if args[:2] == ("security", "find-identity"):
             return f'1) {fingerprint} "Developer ID Application: Test (TESTTEAM00)"\n'
         return ""
