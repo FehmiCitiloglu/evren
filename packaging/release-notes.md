@@ -26,4 +26,4 @@
 
 Linux'ta API anahtarını kaydetmek için çalışan bir Secret Service anahtarlığı (ör. GNOME Keyring veya uyumlu KWallet) gerekir.
 
-Bu sürümün macOS ve Windows paketleri geliştirici sertifikasıyla imzalanmamıştır; macOS Gatekeeper / Windows SmartScreen ek onay isteyebilir. Kurulum dosyaları için SHA256 özetleri `SHA256SUMS.txt` içindedir.
+Windows paketleri geliştirici sertifikasıyla imzalanmadığından SmartScreen ek onay isteyebilir. macOS paketleri Developer ID Application sertifikasıyla imzalanır, Apple noter onayından geçer ve onay bileti paketlere eklenir. Kurulum dosyaları için SHA256 özetleri `SHA256SUMS.txt` içindedir.
