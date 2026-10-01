@@ -8,3 +8,8 @@ skills/aviation_specialist/
 plugins/unit_converter.py
 build/
 dist/
+release_assets/
+# Private Apple distribution credentials
+*.p12
+*.p8
+*.keychain-db

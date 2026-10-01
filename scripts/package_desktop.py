@@ -74,6 +74,8 @@ cp -a "{stage}/usr/." %{{buildroot}}/usr/
 
 def macos(arch):
     stage = ROOT / "build/dmg"
+    if stage.exists():
+        shutil.rmtree(stage)
     stage.mkdir(parents=True, exist_ok=True)
     shutil.copytree(ROOT / "dist/evren.app", stage / "evren.app", symlinks=True, dirs_exist_ok=True)
     (stage / "Applications").symlink_to("/Applications", target_is_directory=True)

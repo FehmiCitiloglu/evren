@@ -371,13 +371,13 @@ Hazır kurulum dosyaları [GitHub Releases](https://github.com/FehmiCitiloglu/ev
 
 Windows kurucusu kullanıcı hesabına yükler; macOS'ta DMG içinden uygulamayı Applications'a sürükleyin. Python kurulumu gerekmez. ZIP dosyaları taşınabilir Windows/macOS alternatifleridir. Linux arşivinde `usr/bin/evren` çalıştırılır. Alpine/musl desteklenmez. Linux'ta anahtar kaydetmek için Secret Service uyumlu, açık bir anahtarlık gerekir.
 
-Paketler henüz geliştirici sertifikasıyla imzalanmadığından Windows SmartScreen ve macOS Gatekeeper onay isteyebilir. Dosya bütünlüğü `SHA256SUMS.txt` ile kontrol edilebilir.
+Windows paketleri henüz geliştirici sertifikasıyla imzalanmadığından SmartScreen onay isteyebilir. Yeni macOS release akışı Developer ID imzası ve Apple noter onayı gerektirir; daha önce yayımlanan imzasız paketler Gatekeeper onayı isteyebilir. Dosya bütünlüğü `SHA256SUMS.txt` ile kontrol edilebilir. [macOS imzalama ve GitHub Actions secret kurulumu](docs/MACOS_SIGNING.md).
 
 Paketli uygulamanın ayarları Windows'ta `%APPDATA%/evren`, macOS'ta `~/Library/Application Support/evren`, Linux'ta `$XDG_CONFIG_HOME/evren` (varsayılan `~/.config/evren`) altında saklanır.
 
 ### Yeni sürüm yayınlama
 
-1. `pyproject.toml` sürümünü güncelleyin ve değişikliği GitHub'a gönderin.
+1. İlk imzalı macOS release öncesinde [Apple sertifikasını ve Actions secret'larını](docs/MACOS_SIGNING.md#github-releases) hazırlayın. `pyproject.toml` sürümünü güncelleyin ve workflow/script değişiklikleriyle birlikte GitHub'a gönderin.
 2. Aynı sürümün etiketini gönderin: örneğin `git tag v0.2.1` ve `git push origin v0.2.1`.
 3. **Desktop Release** her işletim sisteminde testleri, PyInstaller derlemesini ve paketli uygulamanın açılış kontrolünü çalıştırır. Tüm kurulum dosyaları hazır olduğunda release yayınlanır.
 

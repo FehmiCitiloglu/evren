@@ -5,6 +5,7 @@ macOS (evren.app), Windows (evren.exe) ve Linux (evren)
 için tek tıkla çalıştırılabilir ikili (binary) paketler üretir.
 """
 from importlib.metadata import version
+import os
 import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_all
@@ -87,7 +88,7 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
-    codesign_identity=None,
+    codesign_identity=os.environ.get("EVREN_CODESIGN_IDENTITY") if is_mac else None,
     entitlements_file=None,
     icon=icon_file,
 )

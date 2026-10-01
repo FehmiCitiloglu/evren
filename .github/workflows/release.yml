@@ -20,7 +20,7 @@ jobs:
   build-desktop:
     name: Desktop (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 100
     strategy:
       fail-fast: false
       matrix:
@@ -57,21 +57,52 @@ jobs:
       - name: Test on macOS and Windows
         if: runner.os != 'Linux'
         run: python scripts/test_desktop.py
+      - name: Prepare Apple signing certificate and notarization credentials
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: python scripts/setup_macos_signing.py
       - name: Build desktop application
+        env:
+          PYINSTALLER_STRICT_BUNDLE_CODESIGN_ERROR: '1'
         run: python -m PyInstaller evren.spec --clean --noconfirm
       - name: Smoke test packaged application on Linux
         if: runner.os == 'Linux'
         run: xvfb-run -a python scripts/smoke_desktop.py
-      - name: Smoke test packaged application on macOS and Windows
-        if: runner.os != 'Linux'
+      - name: Smoke test packaged application on Windows
+        if: runner.os == 'Windows'
         run: python scripts/smoke_desktop.py
+      - name: Notarize macOS application and create signed installers
+        if: runner.os == 'macOS'
+        run: python scripts/sign_macos.py --skip-build --identity "$EVREN_CODESIGN_IDENTITY" --profile evren-notary
       - name: Create native installers
+        if: runner.os != 'macOS'
         run: python scripts/package_desktop.py ${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.platform }}
           path: release_assets/*
           if-no-files-found: error
+      - name: Preserve macOS notarization reports
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: notarization-${{ matrix.platform }}
+          path: build/notarization/*.json
+          if-no-files-found: ignore
+      - name: Remove temporary Apple signing credentials
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          signing_keychain="$RUNNER_TEMP/evren-signing.keychain-db"
+          if [[ -f "$signing_keychain" ]]; then
+            security delete-keychain "$signing_keychain"
+          fi
+          rm -f "$RUNNER_TEMP/evren-signing.p12"
 
   build-python:
     runs-on: ubuntu-22.04
@@ -107,7 +138,12 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: release_assets
+          pattern: desktop-*
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: release_assets
       - name: Verify all installers and generate SHA256 checksums
         env:
           RELEASE_TAG: ${{ inputs.tag_name || github.ref_name }}
