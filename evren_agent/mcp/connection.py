@@ -354,7 +354,7 @@ class MCPConnectionManager:
     async def acquire_for_session(self, session_id: str, server_name: str) -> bool:
         """Associate session with server, starting connection if not already running."""
         conn = self.connections.get(server_name)
-        if not conn:
+        if not conn or not conn.config.enabled:
             return False
         conn.used_by_sessions.add(session_id)
         if conn.status != MCPStatus.CONNECTED:

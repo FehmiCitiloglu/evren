@@ -67,13 +67,20 @@ class SessionToolFilter:
     - MCP tools belonging to servers explicitly enabled in this session's active_mcp_servers.
     """
 
-    def __init__(self, tool_registry: ToolRegistry, connection_manager: Optional[MCPConnectionManager] = None):
+    def __init__(self, tool_registry: ToolRegistry, connection_manager: Optional[MCPConnectionManager] = None,
+                 mcp_registry: Optional[ToolRegistry] = None):
         self.tool_registry = tool_registry
         self.connection_manager = connection_manager
+        self.mcp_registry = mcp_registry
+
+    def _registry_for(self, name: str) -> ToolRegistry:
+        if self.mcp_registry and self.mcp_registry.get_tool(name):
+            return self.mcp_registry
+        return self.tool_registry
 
     def is_tool_allowed(self, tool_name: str, session: ChatSession) -> bool:
         """Check if a tool is permitted in the context of the given ChatSession."""
-        tool_def = self.tool_registry.get_tool(tool_name)
+        tool_def = self._registry_for(tool_name).get_tool(tool_name)
         if not tool_def:
             return False
 
@@ -95,6 +102,8 @@ class SessionToolFilter:
             if self.connection_manager:
                 conn = self.connection_manager.get_connection(server_name)
                 if conn:
+                    if not conn.config.enabled:
+                        return False
                     policy = conn.config.tool_policy
                     if policy.mode == ToolPolicyMode.DENY:
                         return False
@@ -111,6 +120,10 @@ class SessionToolFilter:
     def get_schemas(self, session: ChatSession) -> List[Dict[str, Any]]:
         """Return tool schemas filtered strictly for the given chat session."""
         all_tools = self.tool_registry.list_tools()
+        if self.mcp_registry:
+            merged = {tool.name: tool for tool in all_tools}
+            merged.update({tool.name: tool for tool in self.mcp_registry.list_tools()})
+            all_tools = list(merged.values())
         schemas = []
         for t in all_tools:
             if self.is_tool_allowed(t.name, session):
@@ -128,4 +141,4 @@ class SessionToolFilter:
                 is_error=True,
             )
 
-        return await self.tool_registry.execute(tool_call)
+        return await self._registry_for(name).execute(tool_call)

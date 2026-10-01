@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import threading
 import json
 import logging
 import os
@@ -49,6 +50,8 @@ class MCPClient:
         self.headers = headers or {}
         self.on_log = on_log
         self.is_stdio = bool(command)
+        self._builtin_server = None
+        self._builtin_lock = threading.Lock()
 
         self._process: Optional[asyncio.subprocess.Process] = None
         self._request_id: int = 1
@@ -112,7 +115,10 @@ class MCPClient:
 
         self._log("INFO", f"Connecting to MCP server '{self.name}'...")
         t0 = time.time()
-        if self.is_stdio:
+        if self.command == "builtin:computer-use":
+            from evren_agent.computer_use.mcp_server import ComputerUseMCPServer
+            self._builtin_server = await asyncio.to_thread(ComputerUseMCPServer)
+        elif self.is_stdio:
             await self._connect_stdio()
         elif self.url:
             await self._connect_http()
@@ -202,6 +208,17 @@ class MCPClient:
         self._request_id += 1
 
         request = JSONRPCRequest(id=req_id, method=method, params=params)
+
+        if self._builtin_server is not None:
+            server = self._builtin_server
+            def handle():
+                # Native actions from multiple chats must not interleave.
+                with self._builtin_lock:
+                    return server.handle_request(request.model_dump())
+            response = await asyncio.wait_for(asyncio.to_thread(handle), timeout=timeout)
+            if response and response.get("error"):
+                raise RuntimeError(response["error"].get("message", "Computer-use MCP error"))
+            return response.get("result") if response else None
 
         if self.is_stdio:
             if not self._process or not self._process.stdin:
@@ -314,9 +331,16 @@ class MCPClient:
             isError=res.get("isError", False),
         )
 
+    def stop_local_actions(self) -> None:
+        if self._builtin_server:
+            self._builtin_server.service.stop()
+
     async def disconnect(self, grace_period: float = 3.0) -> None:
         """Shutdown subprocess and clean up with graceful termination followed by kill."""
         self._is_connected = False
+        if self._builtin_server:
+            self.stop_local_actions()
+            self._builtin_server = None
         if self._read_task:
             self._read_task.cancel()
         if self._stderr_task:

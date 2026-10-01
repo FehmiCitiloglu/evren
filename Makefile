@@ -20,7 +20,7 @@ test:
 	@.venv/bin/pytest || .venv/Scripts/pytest.exe
 
 test-ui:
-	@.venv/bin/pytest tests/test_ui.py tests/test_ui_chat.py tests/test_ui_projects.py || .venv/Scripts/pytest.exe tests/test_ui.py tests/test_ui_chat.py tests/test_ui_projects.py
+	@.venv/bin/pytest tests/test_ui.py tests/test_ui_chat.py tests/test_ui_chat_workspace.py tests/test_ui_projects.py || .venv/Scripts/pytest.exe tests/test_ui.py tests/test_ui_chat.py tests/test_ui_chat_workspace.py tests/test_ui_projects.py
 
 run:
 	@.venv/bin/evren-agent || .venv/Scripts/evren-agent.exe

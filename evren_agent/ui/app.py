@@ -20,6 +20,7 @@ from evren_agent.ui.service import EvrenService
 from evren_agent.ui.theme import APP_NAME
 from evren_agent.ui.views.about_view import AboutView
 from evren_agent.ui.views.chat_view import ChatView
+from evren_agent.ui.views.chat_workspace import ChatWorkspace
 from evren_agent.ui.views.mcp_view import MCPView
 from evren_agent.ui.views.ocr_view import OCRView
 from evren_agent.ui.views.projects_view import ProjectsView
@@ -260,8 +261,9 @@ class EvrenApp(ctk.CTk):
         try:
             from tkinter import messagebox
             # Signal any active agent service
+            self.service.stop_computer_use()
             self.cu_stop_btn.configure(text="DURDURULDU ✓", fg_color="#4b5563")
-            messagebox.showinfo("Acil Durdurma", "Bilgisayar kullanımı durduruldu.")
+            messagebox.showinfo("Acil Durdurma", "Bilgisayar kullanımı durduruldu. Yeniden kullanmak için MCP yöneticisinden computer-use sunucusunu yeniden başlatın.")
         except Exception:
             pass
 
@@ -275,7 +277,7 @@ class EvrenApp(ctk.CTk):
 
         # Görünümleri oluştur ve sakla
         self.views["projects"] = ProjectsView(self.content_container, service=self.service)
-        self.views["chat"] = ChatView(self.content_container, service=self.service)
+        self.views["chat"] = ChatWorkspace(self.content_container, service=self.service)
         self.views["mcp"] = MCPView(self.content_container, service=self.service)
         self.views["ocr"] = OCRView(self.content_container, service=self.service)
         self.views["transcribe"] = TranscribeView(self.content_container, service=self.service)
@@ -331,7 +333,7 @@ class EvrenApp(ctk.CTk):
     def _on_new_chat_shortcut(self) -> None:
         self.show_view("chat")
         chat_v = self.views.get("chat")
-        if isinstance(chat_v, ChatView):
+        if isinstance(chat_v, (ChatView, ChatWorkspace)):
             chat_v.new_chat()
 
     def _check_initial_status(self) -> None:

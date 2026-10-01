@@ -236,9 +236,13 @@ class ChatMessageBubble(ctk.CTkFrame):
 class ChatView(ctk.CTkFrame):
     """Sohbet Arayüzü Ana Görünümü."""
 
-    def __init__(self, master: Any, service: EvrenService, **kwargs: Any) -> None:
+    def __init__(self, master: Any, service: EvrenService, session_id: Optional[str] = None,
+                 navigate: Optional[Callable[[Optional[str]], None]] = None,
+                 on_history_change: Optional[Callable[[], None]] = None, **kwargs: Any) -> None:
         super().__init__(master, fg_color="transparent", **kwargs)
         self.service = service
+        self._navigate = navigate
+        self._on_history_change = on_history_change
         self.session: ChatSession = self.service.get_or_create_session()
         self.messages: List[Dict[str, Any]] = []
         self.attached_image_path: Optional[str] = None
@@ -247,7 +251,6 @@ class ChatView(ctk.CTkFrame):
         self._current_activity: Optional[ToolActivityGroup] = None
         self._scroll_job: Optional[str] = None
         self._scroll_force = False
-        self._save_job: Optional[str] = None
         self._current_bot_record: Optional[Dict[str, Any]] = None
         self._history_ids: Dict[str, str] = {}
         self.is_streaming = False
@@ -258,7 +261,9 @@ class ChatView(ctk.CTkFrame):
         self._update_mcp_chips()
         self._refresh_history()
         history = self.service.list_chat_history()
-        if history:
+        if session_id:
+            self._restore_chat(session_id)
+        elif history and navigate is None:
             self._restore_chat(history[0]["session_id"])
 
     def _build_ui(self) -> None:
@@ -268,15 +273,19 @@ class ChatView(ctk.CTkFrame):
         # 1. ÜST PANEL: Model Seçimi, MCP Seçimi, Parametreler ve Aksiyon Butonları
         top_bar = ctk.CTkFrame(self, fg_color=("gray90", "#1e293b"), corner_radius=10)
         top_bar.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 6))
+        model_bar = ctk.CTkFrame(top_bar, fg_color="transparent")
+        model_bar.pack(fill="x")
+        actions_bar = ctk.CTkFrame(top_bar, fg_color="transparent")
+        actions_bar.pack(fill="x")
 
         # Model Seçici
-        model_lbl = ctk.CTkLabel(top_bar, text="Model:", font=ctk.CTkFont(size=12, weight="bold"))
+        model_lbl = ctk.CTkLabel(model_bar, text="Model:", font=ctk.CTkFont(size=12, weight="bold"))
         model_lbl.pack(side="left", padx=(12, 4), pady=10)
 
         self.model_combo = ctk.CTkComboBox(
-            top_bar,
+            model_bar,
             values=[self.service.default_model],
-            width=170,
+            width=140,
             command=self._on_model_selected,
         )
         self.model_combo.set(self.service.default_model)
@@ -284,9 +293,9 @@ class ChatView(ctk.CTkFrame):
 
         # MCP Seçici Butonu (Current Chat MCP Indicator)
         self.mcp_btn = ctk.CTkButton(
-            top_bar,
+            model_bar,
             text="🔌 MCP (0)",
-            width=100,
+            width=80,
             height=28,
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="transparent",
@@ -299,9 +308,9 @@ class ChatView(ctk.CTkFrame):
 
         # Ayarları Göster / Gizle Butonu
         self.toggle_params_btn = ctk.CTkButton(
-            top_bar,
+            model_bar,
             text="Parametreler ▼",
-            width=110,
+            width=100,
             height=28,
             fg_color="transparent",
             border_width=1,
@@ -312,7 +321,7 @@ class ChatView(ctk.CTkFrame):
 
         # Sağ Taraf Butonları: Yeni Sohbet & Dışa Aktar & Temizle
         clear_btn = ctk.CTkButton(
-            top_bar,
+            actions_bar,
             text="Sohbeti sil",
             width=70,
             height=28,
@@ -324,7 +333,7 @@ class ChatView(ctk.CTkFrame):
         clear_btn.pack(side="right", padx=(4, 12), pady=10)
 
         export_btn = ctk.CTkButton(
-            top_bar,
+            actions_bar,
             text="Dışa Aktar",
             width=85,
             height=28,
@@ -336,7 +345,7 @@ class ChatView(ctk.CTkFrame):
         export_btn.pack(side="right", padx=4, pady=10)
 
         new_chat_btn = ctk.CTkButton(
-            top_bar,
+            actions_bar,
             text="+ Yeni Sohbet",
             width=100,
             height=28,
@@ -345,6 +354,8 @@ class ChatView(ctk.CTkFrame):
             command=self.new_chat,
         )
         new_chat_btn.pack(side="right", padx=4, pady=10)
+        if self._navigate:
+            new_chat_btn.pack_forget()
 
         history_bar = ctk.CTkFrame(self, fg_color="transparent")
         history_bar.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 4))
@@ -357,6 +368,11 @@ class ChatView(ctk.CTkFrame):
         self.history_status = ctk.CTkLabel(history_bar, text="", font=ctk.CTkFont(size=11),
                                           text_color=("gray40", "#94a3b8"))
         self.history_status.grid(row=0, column=2, padx=(10, 0))
+        if self._navigate:
+            self.history_combo.grid_remove()
+            for child in history_bar.winfo_children():
+                if child is not self.history_status:
+                    child.grid_remove()
 
         # 2. KATLANABİLİR PARAMETRE PANELİ
         self.params_frame = ctk.CTkFrame(self, fg_color=("gray95", "#161f2e"), corner_radius=8)
@@ -610,6 +626,9 @@ class ChatView(ctk.CTkFrame):
         self._save_history()
 
     def _refresh_history(self) -> None:
+        if self._on_history_change:
+            self._on_history_change()
+            return
         self._history_ids.clear()
         selected = "Yeni sohbet"
         for record in self.service.list_chat_history():
@@ -630,6 +649,9 @@ class ChatView(ctk.CTkFrame):
 
     def _select_history(self, label: str) -> None:
         session_id = self._history_ids.get(label)
+        if self._navigate and session_id:
+            self._navigate(session_id)
+            return
         if session_id and session_id != self.session.session_id and not self.is_streaming:
             self._restore_chat(session_id)
 
@@ -670,18 +692,10 @@ class ChatView(ctk.CTkFrame):
         self.sys_entry.insert(0, session.system_prompt)
         self._update_mcp_chips()
         self._refresh_history()
-        self.history_status.configure(text="Kayıt açıldı", text_color=("gray40", "#94a3b8"))
+        self.history_status.configure(text="")
         self._scroll_to_bottom(force=True)
 
-    def _schedule_save(self) -> None:
-        if self._save_job is None and self.is_streaming:
-            self.history_status.configure(text="Kaydediliyor…", text_color=("gray40", "#94a3b8"))
-            self._save_job = self.after(700, self._save_history)
-
     def _save_history(self) -> bool:
-        if self._save_job is not None:
-            self.after_cancel(self._save_job)
-            self._save_job = None
         if not self.messages:
             return True
         if self._current_bot_record is not None and self._current_activity is not None:
@@ -696,7 +710,7 @@ class ChatView(ctk.CTkFrame):
         except Exception:
             self.history_status.configure(text="Kaydedilemedi", text_color=("#b91c1c", "#f87171"))
             return False
-        self.history_status.configure(text="Kaydedildi", text_color=("gray40", "#94a3b8"))
+        self.history_status.configure(text="")
         return True
 
     def _delete_chat(self) -> None:
@@ -715,6 +729,8 @@ class ChatView(ctk.CTkFrame):
         self.clear_chat()
         self._update_mcp_chips()
         self._refresh_history()
+        if self._navigate:
+            self._navigate(self.session.session_id)
 
     def _select_image(self) -> None:
         """Multimodal sohbet için görsel dosyası seçer."""
@@ -770,7 +786,7 @@ class ChatView(ctk.CTkFrame):
     def _on_send_pressed(self) -> None:
         if self.is_streaming:
             # Durdur
-            self.service.cancel_active_stream()
+            self.service.cancel_active_stream(self.session.session_id)
             if self.current_bot_bubble:
                 content = self.current_bot_bubble.raw_content
                 if content == "Yanıt hazırlanıyor...":
@@ -835,7 +851,6 @@ class ChatView(ctk.CTkFrame):
         # Akışı Başlat
         self.is_streaming = True
         self.send_btn.configure(text="Durdur", fg_color="#ef4444", hover_color="#dc2626")
-        self.history_combo.configure(state="disabled")
 
         # Oturum parametrelerini güncelle
         self.session.model = model
@@ -908,7 +923,6 @@ class ChatView(ctk.CTkFrame):
 
             elif evt.type == AgentEventType.ERROR:
                 complete(error=evt.content or "Bilinmeyen hata")
-            self._schedule_save()
 
         def on_done(full_text: str):
             complete(full_text)
@@ -988,6 +1002,9 @@ class ChatView(ctk.CTkFrame):
 
     def new_chat(self) -> None:
         """Yeni bir sohbet oturumu başlatır."""
+        if self._navigate:
+            self._navigate(None)
+            return
         if self.is_streaming:
             self._on_send_pressed()
         if not self._save_history():
@@ -1000,7 +1017,7 @@ class ChatView(ctk.CTkFrame):
     def clear_chat(self, *, reset_session: bool = True) -> None:
         """Tüm sohbet geçmişini temizler."""
         if self.is_streaming:
-            self.service.cancel_active_stream()
+            self.service.cancel_active_stream(self.session.session_id)
             self._finish_streaming()
         if self._scroll_job is not None:
             self.after_cancel(self._scroll_job)
@@ -1009,9 +1026,6 @@ class ChatView(ctk.CTkFrame):
         self.current_bot_bubble = None
         self._current_activity = None
         self._current_bot_record = None
-        if self._save_job is not None:
-            self.after_cancel(self._save_job)
-            self._save_job = None
         self.messages.clear()
         if reset_session:
             self.session.clear()

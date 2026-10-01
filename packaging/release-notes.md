@@ -1,13 +1,11 @@
-## v0.2.9 değişiklikleri
+## v0.2.10 değişiklikleri
 
-- Kullanıcı mesajları sağda, model yanıtları solda; pencere genişliğine uyumlu, daha okunabilir sohbet balonları.
-- Komutlar, araç çağrıları ve model düşüncesi yanıt başına kapalı bir işlem ayrıntıları bölümünde toplandı.
-- Tam komut çıktıları kaydırılarak incelenebilir ve kopyalanabilir.
-- Sohbet geçmişi yerel veritabanına otomatik kaydedilir; eski konuşmalar açılıp sürdürülebilir.
-- Mesajlar, ekli görseller, model ayarları ve işlem ayrıntıları uygulama yeniden açıldığında geri yüklenir.
-- Yeni sohbet önceki konuşmayı korur; seçili sohbet kullanıcı onayıyla silinebilir.
-- Yarım kalan yanıtların kurtarılması, tekrarlanan araç çağrıları ve geç gelen akış olayları için düzeltmeler.
-- Sohbet alanı, parametre paneli ve ek çubuklarının yerleşim çakışmaları giderildi; geçmişi okurken ekranın zorla aşağı kaydırılması engellendi.
+- Sohbet geçmişi aranabilir bir yan listeye taşındı; taslaklar ve kaydırma konumları korunur.
+- Bir sohbet yanıt yazarken başka sohbetlerde soru sorulabilir; yanıtlar arka planda bağımsız devam eder.
+- Yanıt yazılan ve yeni yanıt gelen sohbetler listede işaretlenir. Durdur düğmesi yalnızca seçili sohbeti durdurur.
+- Akış sırasında ara kayıtlar ve sürekli “Kaydediliyor” göstergesi kaldırıldı. Yanıt tamamlandığında veya durdurulduğunda kayıt yapılır.
+- Her sohbetin model, araç işleyicileri ve çalışma dizini ayrı tutulur; diğer sohbetlerin ayarlarıyla karışmaz.
+- Computer-use MCP varsayılan olarak eklenir ve yeni sohbetlerde seçilir. Yerleşik sunucu harici Python gerektirmez; kapatma ve kaldırma tercihleri korunur.
 
 ## Masaüstü kurulumu
 

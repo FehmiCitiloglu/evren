@@ -23,6 +23,8 @@ class ChatServiceStub:
         self.sessions = {}
         self.streams = []
         self.cancelled = 0
+        self.cancelled_sessions = []
+        self.writes = 0
         self.mcps = []
 
     def get_or_create_session(self, session_id=None):
@@ -38,6 +40,7 @@ class ChatServiceStub:
         return session
 
     def save_chat_transcript(self, session, messages):
+        self.writes += 1
         self.chat_history.save_transcript(session, messages)
 
     def list_chat_history(self):
@@ -62,8 +65,9 @@ class ChatServiceStub:
     def chat_agent_stream_async(self, **kwargs):
         self.streams.append(kwargs)
 
-    def cancel_active_stream(self):
+    def cancel_active_stream(self, session_id=None):
         self.cancelled += 1
+        self.cancelled_sessions.append(session_id)
 
 
 def pump(root, seconds=0):
@@ -380,10 +384,12 @@ def test_restart_recovers_partial_reply_and_folded_activity(chat):
     emit(root, stream, AgentEventType.TEXT_DELTA, content="Kısmi yanıt")
     emit(root, stream, AgentEventType.TOOL_CALL_STARTED, tool_name="slow_command")
     pump(root, 0.8)
+    # Streaming stays in memory; closing the window saves its unfinished turn.
+    assert service.load_chat_transcript(view.session.session_id)[1]["content"] == ""
+    view.destroy()
     saved = service.load_chat_transcript(view.session.session_id)
     assert saved[1]["content"] == "Kısmi yanıt"
     assert saved[1]["pending"]
-    view.destroy()
     reopened_service = ChatServiceStub(service.chat_history.path)
     reopened = ChatView(root, reopened_service)
     reopened.pack(fill="both", expand=True)

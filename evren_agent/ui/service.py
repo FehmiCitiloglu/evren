@@ -7,7 +7,10 @@ anlaşılır Türkçe metinlere dönüştürür.
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
+from concurrent.futures import Future
 import json
+import logging
 import os
 import threading
 import sys
@@ -31,6 +34,7 @@ from evren_agent.core.runtime import AsyncRuntime
 from evren_agent.core.session import ChatSession, SessionToolFilter
 from evren_agent.credentials import get_api_key, set_api_key
 from evren_agent.mcp.connection import MCPConnectionManager
+from evren_agent.mcp.defaults import add_desktop_defaults
 from evren_agent.mcp.models import (
     MCPLogEntry,
     MCPServerConfig,
@@ -40,6 +44,8 @@ from evren_agent.mcp.models import (
 )
 from evren_agent.projects.service import ProjectService
 from evren_agent.projects.workspace import WorkspaceSnapshot, capture_workspace, compare_workspaces
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -106,6 +112,7 @@ class EvrenService:
                 base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
             self.config_path = base / "evren" / "config.yaml"
         self.config = load_config(self.config_path)
+        add_desktop_defaults(self.config)
         self.provider = "evren"
         self._provider_cfg = self.config.get("providers", {}).get(self.provider, {})
         self.base_url = self._provider_cfg.get("base_url", DEFAULT_BASE_URL)
@@ -113,6 +120,11 @@ class EvrenService:
         self.timeout = float(self.config.get("timeout", 180.0))
         self._cached_models: List[str] = VARSAYILAN_MODELLER.copy()
         self._active_stream_cancel: Optional[threading.Event] = None
+        self._stream_lock = threading.RLock()
+        self._streams: Dict[str, threading.Event] = {}
+        self._stream_futures: Dict[str, Future] = {}
+        self._session_agents: Dict[str, Agent] = {}
+        self._computer_use_stopped = False
         db_path = None
         if self.config_path:
             db_path = self.config_path.parent / "projects.db"
@@ -128,10 +140,26 @@ class EvrenService:
         self.sessions: Dict[str, ChatSession] = {}
         self.agent: Optional[Agent] = None
         self._mcp_listeners: List[Callable[[], None]] = []
+        self.mcp_manager.add_listener(self._on_mcp_status)
 
         # Connect autostart servers in background
         self.runtime.submit(self.mcp_manager.autostart_servers())
 
+
+    def _on_mcp_status(self, name, status) -> None:
+        if status == MCPStatus.CONNECTED and self._computer_use_stopped:
+            connection = self.mcp_manager.get_connection(name)
+            if connection and connection.client:
+                connection.client.stop_local_actions()
+        self._notify_mcp_listeners()
+
+    def stop_computer_use(self) -> None:
+        self._computer_use_stopped = True
+        for connection in list(self.mcp_manager.connections.values()):
+            if connection.client:
+                connection.client.stop_local_actions()
+        for agent in list(self._session_agents.values()):
+            agent.stop_computer_use()
 
     def get_key(self) -> str:
         """Kayıtlı API anahtarını işletim sistemi kasasından veya ortamdan okur."""
@@ -313,9 +341,16 @@ class EvrenService:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def cancel_active_stream(self) -> None:
-        """Akış halindeki sohbet üretimini durdurur."""
-        if self._active_stream_cancel:
+    def cancel_active_stream(self, session_id: Optional[str] = None) -> None:
+        """Stop only the requested conversation; no ID stops all at shutdown."""
+        with self._stream_lock:
+            ids = [session_id] if session_id else list(self._streams)
+            for sid in ids:
+                if sid in self._streams:
+                    self._streams[sid].set()
+                if sid in self._stream_futures:
+                    self._stream_futures[sid].cancel()
+        if session_id is None and self._active_stream_cancel:
             self._active_stream_cancel.set()
 
     def chat_stream_async(
@@ -508,8 +543,16 @@ class EvrenService:
             except Exception:
                 pass
 
-    def get_agent(self) -> Agent:
-        """Returns the shared core Agent instance integrated with MCP tool registry."""
+    def get_agent(self, session_id: Optional[str] = None) -> Agent:
+        """Keep providers, plugins and working directories local to each chat."""
+        if session_id:
+            if session_id not in self._session_agents:
+                config = deepcopy(self.config)
+                # The desktop connection pool owns MCP lifecycle and filtering.
+                config["mcp_servers"] = {}
+                self._session_agents[session_id] = Agent(
+                    config=config, config_path=str(self.config_path) if self.config_path else None)
+            return self._session_agents[session_id]
         if self.agent is None:
             self.agent = Agent(config=self.config, config_path=str(self.config_path) if self.config_path else None)
             self.agent.tools = self.mcp_manager.tool_registry
@@ -552,6 +595,8 @@ class EvrenService:
         return record["transcript"] if record else []
 
     def restore_chat_session(self, session_id: str) -> ChatSession:
+        if session_id in self.sessions:
+            return self.sessions[session_id]
         record = self.chat_history.load(session_id)
         if record is None:
             raise KeyError(session_id)
@@ -561,8 +606,10 @@ class EvrenService:
         return session
 
     def delete_chat_history(self, session_id: str) -> None:
+        self.cancel_active_stream(session_id)
         self.chat_history.delete(session_id)
         self.sessions.pop(session_id, None)
+        self._session_agents.pop(session_id, None)
 
     def set_session_mcp(self, session_id: str, server_name: str, enabled: bool) -> None:
         """Enable or disable an MCP server strictly for the specified chat session."""
@@ -635,6 +682,9 @@ class EvrenService:
         on_error: Optional[Callable[[str], None]] = None,
     ) -> None:
         async def run():
+            conn = self.mcp_manager.get_connection(name)
+            if conn and conn.config.command == "builtin:computer-use":
+                self._computer_use_stopped = False
             await self.mcp_manager.restart_server(name)
 
         def _done(_):
@@ -737,6 +787,11 @@ class EvrenService:
             # 1. Remove from config.yaml
             remove_mcp_server_from_config(name, str(self.config_path) if self.config_path else None)
             self.config = load_config(self.config_path)
+            if name == "computer-use":
+                disabled = self.config.setdefault("disabled_default_mcps", [])
+                if name not in disabled:
+                    disabled.append(name)
+                save_config(self.config, self.config_path)
             # 2. Remove from runtime manager
             ok = await self.mcp_manager.remove_server(name)
             # 3. Clean up from all active chat sessions
@@ -835,24 +890,30 @@ class EvrenService:
         on_event: Optional[Callable[[AgentEvent], None]] = None,
         on_done: Optional[Callable[[str], None]] = None,
         on_error: Optional[Callable[[str], None]] = None,
-    ) -> None:
+    ) -> Future:
         """
         Desktop Chat bridge executing the real Agent loop with streaming events and session-scoped MCP tools.
         """
         cancel_event = threading.Event()
-        self._active_stream_cancel = cancel_event
+        with self._stream_lock:
+            if session_id in self._streams and not self._streams[session_id].is_set():
+                raise ValueError("Bu sohbette bir yanıt zaten hazırlanıyor.")
+            self._streams[session_id] = cancel_event
 
         async def run():
             session = self.get_or_create_session(session_id)
-            agent = self.get_agent()
-            if cwd:
-                agent.default_cwd = cwd
+            agent = self.get_agent(session_id)
+            agent.default_cwd = cwd
             await agent.initialize()
+            agent.providers.get_active().set_model(session.model)
+            tool_filter = SessionToolFilter(agent.tools, self.mcp_manager, self.mcp_manager.tool_registry)
 
             # Acquire/connect active MCPs for this session
             for s_name in list(session.active_mcp_servers):
                 try:
-                    await self.mcp_manager.acquire_for_session(session.session_id, s_name)
+                    acquired = await self.mcp_manager.acquire_for_session(session.session_id, s_name)
+                    if not acquired:
+                        continue
                     if on_event:
                         self._dispatch(
                             on_event,
@@ -886,17 +947,15 @@ class EvrenService:
                 async for evt in agent.run_stream(
                     prompt=augmented_prompt,
                     session=session,
-                    session_tool_filter=self.session_tool_filter,
+                    session_tool_filter=tool_filter,
                     cancel_event=cancel_event,
                 ):
-                    if evt.type not in (AgentEventType.TEXT_DELTA, AgentEventType.REASONING_DELTA):
-                        self.chat_history.save_context(session)
                     if on_event:
                         self._dispatch(on_event, evt)
                     if evt.type == AgentEventType.DONE:
                         final_text = evt.content or ""
             finally:
-                self.chat_history.save_context(session)
+                await asyncio.to_thread(self.chat_history.save_context, session)
 
             if on_done:
                 self._dispatch(on_done, final_text)
@@ -907,7 +966,18 @@ class EvrenService:
             elif on_done:
                 self._dispatch(on_done, f"Hata: {e}")
 
-        self.runtime.submit(run(), on_error=_err)
+        future = self.runtime.submit(run(), on_error=_err)
+        with self._stream_lock:
+            self._stream_futures[session_id] = future
+
+        def cleanup(_):
+            with self._stream_lock:
+                if self._streams.get(session_id) is cancel_event:
+                    self._streams.pop(session_id, None)
+                    self._stream_futures.pop(session_id, None)
+
+        future.add_done_callback(cleanup)
+        return future
 
     def shutdown(self) -> None:
         """Cleanly shutdown runtime and all MCP child processes."""
