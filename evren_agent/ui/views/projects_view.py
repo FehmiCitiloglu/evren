@@ -8,6 +8,8 @@ kodlama oturumlarını yöneten merkezi masaüstü çalışma alanı.
 from __future__ import annotations
 
 import datetime
+import json
+import re
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Any, Callable, Dict, List, Optional
@@ -19,6 +21,9 @@ from evren_agent.core.events import AgentEventType
 from evren_agent.projects.context_builder import ProjectContextBuilder
 from evren_agent.projects.analyzer import detect_tech_stack
 from evren_agent.projects.git_service import GitService
+from evren_agent.projects.indexer import is_sensitive_file
+from evren_agent.projects.workspace import workspace_path
+from evren_agent.mcp.models import redact_secrets
 from evren_agent.projects.models import (
     AISuggestion,
     ArchitectureDecision,
@@ -38,6 +43,7 @@ from evren_agent.projects.models import (
 )
 from evren_agent.projects.service import ProjectService
 from evren_agent.ui.service import EvrenService
+from evren_agent.ui.editor import EDITORS, open_in_editor
 from evren_agent.ui.theme import THEME_COLORS
 
 
@@ -838,7 +844,12 @@ class ProjectsView(ctk.CTkFrame):
                 if item.name.startswith(".") or item.name in ("node_modules", "dist", "build", "__pycache__"):
                     continue
                 icon = "📁" if item.is_dir() else "📄"
-                b = ctk.CTkLabel(files_scroll, text=f"{icon} {item.name}", font=ctk.CTkFont(size=11), anchor="w")
+                b = ctk.CTkButton(
+                    files_scroll, text=f"{icon} {item.name}", font=ctk.CTkFont(size=11), anchor="w",
+                    fg_color="transparent", height=26,
+                    command=lambda path=item: self._open_coding_editor(str(path)) if path.is_dir()
+                    else self._preview_coding_file(path.relative_to(Path(p.local_path)).as_posix()),
+                )
                 b.pack(fill="x", padx=4, pady=2)
 
         # ORTA PANE: Ajan Konuşma & Planlama Alanı
@@ -850,15 +861,104 @@ class ProjectsView(ctk.CTkFrame):
         mid_head = ctk.CTkFrame(mid_pane, fg_color="transparent")
         mid_head.grid(row=0, column=0, sticky="ew", padx=12, pady=8)
 
-        agent_title = ctk.CTkLabel(mid_head, text="🤖 Evren Coding Agent", font=ctk.CTkFont(size=13, weight="bold"), text_color="#f8fafc")
-        agent_title.pack(side="left")
+        title_row = ctk.CTkFrame(mid_head, fg_color="transparent")
+        title_row.pack(fill="x")
+        title_row.grid_columnconfigure(0, weight=1)
+        agent_title = ctk.CTkLabel(title_row, text="🤖 Evren Coding Agent", font=ctk.CTkFont(size=13, weight="bold"), text_color="#f8fafc")
+        agent_title.grid(row=0, column=0, sticky="w")
+
+        state = self._coding_state()
+        settings = self.project_service.db.get_settings(self.current_project_id)
+        selected_model = settings.coding_model or self.service.default_model
+        model_row = ctk.CTkFrame(mid_head, fg_color="transparent")
+        model_row.pack(fill="x", pady=(6, 0))
+        model_row.grid_columnconfigure(1, weight=1)
+        model_row.grid_columnconfigure(3, weight=1)
+        ctk.CTkLabel(model_row, text="Model:", font=ctk.CTkFont(size=12, weight="bold")).grid(
+            row=0, column=0, padx=(0, 6), sticky="w",
+        )
+        self.coding_model_combo = ctk.CTkComboBox(
+            model_row,
+            values=list(dict.fromkeys([selected_model, *self.service._cached_models])),
+            width=130,
+            state="disabled" if state["busy"] else "readonly",
+            command=self._on_coding_model_selected,
+        )
+        self.coding_model_combo.set(selected_model)
+        self.coding_model_combo.grid(row=0, column=1, sticky="ew", padx=(0, 10))
+        self._load_coding_models()
+
+        ctk.CTkLabel(model_row, text="Editör:", font=ctk.CTkFont(size=12, weight="bold")).grid(
+            row=0, column=2, padx=(0, 6), sticky="w",
+        )
+        self.coding_editor_combo = ctk.CTkComboBox(
+            model_row, values=EDITORS, state="readonly", width=130,
+            command=self._on_coding_editor_selected,
+        )
+        editor = self.service.config.get("coding_editor", {})
+        self.coding_editor_combo.set(editor.get("name", "VS Code"))
+        self.coding_editor_combo.grid(row=0, column=3, sticky="ew", padx=(0, 6))
+        self.coding_open_project_btn = ctk.CTkButton(
+            model_row, text="Projeyi Aç", width=95, command=self._open_coding_editor,
+        )
+        self.coding_open_project_btn.grid(row=0, column=4)
+        self.coding_status_label = ctk.CTkLabel(
+            title_row, text=state["status"], font=ctk.CTkFont(size=11), anchor="e",
+            text_color=("gray30", "#94a3b8"), wraplength=300,
+        )
+        self.coding_status_label.grid(row=0, column=1, sticky="e", padx=(8, 0))
+
+        self.coding_tabs = ctk.CTkTabview(mid_pane, fg_color="transparent", height=220)
+        self.coding_tabs.grid(row=1, column=0, sticky="nsew", padx=8, pady=4)
+        for name in ("Sohbet", "Değişiklikler", "İşlemler", "Dosyalar"):
+            tab = self.coding_tabs.add(name)
+            tab.grid_columnconfigure(0, weight=1)
+            tab.grid_rowconfigure(0, weight=1)
 
         # Chat / Plan Textbox
-        self.coding_chat_box = ctk.CTkTextbox(mid_pane, font=ctk.CTkFont(size=12), wrap="word")
-        self.coding_chat_box.grid(row=1, column=0, sticky="nsew", padx=12, pady=4)
-        state = self._coding_state()
+        self.coding_chat_box = ctk.CTkTextbox(self.coding_tabs.tab("Sohbet"), font=ctk.CTkFont(size=12), wrap="word")
+        self.coding_chat_box.grid(row=0, column=0, sticky="nsew")
         self.coding_chat_box.insert("end", state["text"])
         self._coding_rendered_text = state["text"]
+
+        changes_tab = self.coding_tabs.tab("Değişiklikler")
+        changes_tab.grid_rowconfigure(0, weight=0)
+        changes_tab.grid_rowconfigure(2, weight=1)
+        changes_head = ctk.CTkFrame(changes_tab, fg_color="transparent")
+        changes_head.grid(row=0, column=0, sticky="ew")
+        changes_head.grid_columnconfigure(0, weight=1)
+        self.coding_changes_summary = ctk.CTkLabel(changes_head, text="", anchor="w", justify="left", wraplength=360)
+        self.coding_changes_summary.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.coding_refresh_changes_btn = ctk.CTkButton(
+            changes_head, text="Yenile", width=65, command=self._refresh_coding_changes_async,
+        )
+        self.coding_refresh_changes_btn.grid(row=0, column=1)
+        changes_list_frame = ctk.CTkFrame(changes_tab, height=50, fg_color="transparent")
+        changes_list_frame.grid(row=1, column=0, sticky="ew", pady=4)
+        changes_list_frame.grid_propagate(False)
+        changes_list_frame.grid_columnconfigure(0, weight=1)
+        changes_list_frame.grid_rowconfigure(0, weight=1)
+        self.coding_changes_list = ctk.CTkScrollableFrame(changes_list_frame, height=50, fg_color="transparent")
+        self.coding_changes_list.grid(row=0, column=0, sticky="nsew")
+        self.coding_diff_box = ctk.CTkTextbox(changes_tab, height=100, wrap="none", font=ctk.CTkFont(family="monospace", size=12))
+        self.coding_diff_box.grid(row=2, column=0, sticky="nsew")
+        self.coding_diff_box.tag_config("added", foreground="#10b981")
+        self.coding_diff_box.tag_config("removed", foreground="#f87171")
+        self.coding_diff_box.tag_config("header", foreground="#38bdf8")
+        self.coding_open_file_btn = ctk.CTkButton(
+            changes_tab, text="Seçili Dosyayı Editörde Aç", command=self._open_selected_coding_file,
+        )
+        self.coding_open_file_btn.grid(row=3, column=0, sticky="e", pady=(6, 0))
+        self.coding_activity_list = ctk.CTkScrollableFrame(self.coding_tabs.tab("İşlemler"), fg_color="transparent")
+        self.coding_activity_list.grid(row=0, column=0, sticky="nsew")
+        self.coding_files_list = ctk.CTkScrollableFrame(self.coding_tabs.tab("Dosyalar"), fg_color="transparent")
+        self.coding_files_list.grid(row=0, column=0, sticky="nsew")
+        ctk.CTkButton(self.coding_tabs.tab("Dosyalar"), text="Dosyaları Yenile", command=self._refresh_coding_files_async).grid(
+            row=1, column=0, sticky="e", pady=(6, 0),
+        )
+        self._refresh_coding_changes()
+        self._refresh_coding_activity()
+        self._refresh_coding_files_async()
 
         # Input Area
         input_box = ctk.CTkFrame(mid_pane, fg_color="transparent")
@@ -922,12 +1022,241 @@ class ProjectsView(ctk.CTkFrame):
         mid_pane.bind("<Configure>", lambda e: layout_panes(type("Size", (), {"width": container.winfo_width()})()))
         layout_panes(type("Size", (), {"width": container.winfo_width()})())
 
+    def _load_coding_models(self) -> None:
+        combo = self.coding_model_combo
+
+        def on_models(models: List[str]) -> None:
+            if combo.winfo_exists():
+                combo.configure(values=list(dict.fromkeys([combo.get(), *models])))
+
+        self.service.fetch_models_async(on_success=on_models)
+
+    def _on_coding_model_selected(self, model: str) -> None:
+        state = self._coding_state()
+        settings = self.project_service.db.get_settings(self.current_project_id)
+        if state["busy"] or not model.strip():
+            self.coding_model_combo.set(settings.coding_model or self.service.default_model)
+            return
+        settings.coding_model = model.strip()
+        self.project_service.db.save_settings(settings)
+        state["session"].model = settings.coding_model
+
+    def _on_coding_editor_selected(self, editor: str) -> None:
+        previous = self.service.config.get("coding_editor", {})
+        custom_path = previous.get("path", "")
+        if editor == "Özel Editör":
+            custom_path = filedialog.askopenfilename(title="Editörün uygulama dosyasını seçin")
+            if not custom_path:
+                self.coding_editor_combo.set(previous.get("name", "VS Code"))
+                return
+        try:
+            self.service.set_coding_editor(editor, custom_path)
+        except Exception as error:
+            self.coding_editor_combo.set(previous.get("name", "VS Code"))
+            messagebox.showerror("Editör Ayarı", str(error))
+
+    def _open_coding_editor(self, target: Optional[str] = None) -> None:
+        project = self.project_service.db.get_project(self.current_project_id)
+        if not project:
+            return
+        editor = self.service.config.get("coding_editor", {})
+        try:
+            path = workspace_path(project.local_path, target or ".")
+            open_in_editor(editor.get("name", "VS Code"), path, editor.get("path", ""))
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Editör Açılamadı", str(error))
+
+    def _open_selected_coding_file(self) -> None:
+        path = self._coding_state()["selected_change"]
+        if path:
+            self._open_coding_editor(path)
+
+    def _coding_visible(self, project_id: str) -> bool:
+        return (self.current_project_id == project_id and self.active_workspace_tab == "coding"
+                and hasattr(self, "coding_tabs") and self.coding_tabs.winfo_exists())
+
+    def _refresh_coding_changes(self) -> None:
+        state = self._coding_state()
+        changes = state["changes"]
+        added = sum(change["added"] for change in changes)
+        removed = sum(change["removed"] for change in changes)
+        summary = (f"{'Bu çalışma' if state['busy'] else 'Son çalışma'}: {len(changes)} dosya · +{added} / −{removed} satır"
+                   if state["before"] is not None else "Ajanın dosya değişiklikleri burada görünür.")
+        if state["inspection_warning"]:
+            summary += "\n" + state["inspection_warning"]
+        self.coding_changes_summary.configure(text=summary)
+        self.coding_refresh_changes_btn.configure(state="disabled" if state["busy"] else "normal")
+        for widget in self.coding_changes_list.winfo_children():
+            widget.destroy()
+        labels = {"added": "Eklendi", "modified": "Değişti", "deleted": "Silindi"}
+        for change in changes:
+            ctk.CTkButton(
+                self.coding_changes_list,
+                text=f"{labels[change['status']]} · {change['path']}  (+{change['added']} / −{change['removed']})",
+                anchor="w", height=28, fg_color="transparent",
+                command=lambda path=change["path"]: self._show_coding_change(path),
+            ).pack(fill="x", pady=2)
+        paths = [change["path"] for change in changes]
+        if state["selected_change"] not in paths:
+            state["selected_change"] = paths[0] if paths else None
+        self._show_coding_change(state["selected_change"])
+
+    def _show_coding_change(self, path: Optional[str]) -> None:
+        state = self._coding_state()
+        state["selected_change"] = path
+        change = next((c for c in state["changes"] if c["path"] == path), None)
+        self.coding_diff_box.configure(state="normal")
+        self.coding_diff_box.delete("1.0", "end")
+        if change:
+            for index, line in enumerate(change["diff"].splitlines()):
+                tag = "header" if index < 2 or line.startswith("@@") else "added" if line.startswith("+") else "removed" if line.startswith("-") else None
+                self.coding_diff_box.insert("end", line + "\n", tag)
+        else:
+            self.coding_diff_box.insert("end", "Henüz karşılaştırılacak değişiklik yok.")
+        self.coding_diff_box.configure(state="disabled")
+        self.coding_open_file_btn.configure(state="normal" if change and change["status"] != "deleted" else "disabled")
+
+    def _apply_coding_snapshot(self, state: Dict[str, Any], snapshot) -> None:
+        state["snapshot"] = snapshot
+        if state["before"] is not None:
+            state["changes"] = snapshot.changes or []
+        if state["before"] is None:
+            return
+        state["inspection_warning"] = (
+            "Bazı dosyalar okunamadı veya tarama sınırına ulaşıldı; karşılaştırma kısmi."
+            if snapshot.limited or snapshot.skipped or (state["before"] and (state["before"].limited or state["before"].skipped)) else ""
+        )
+
+    def _refresh_coding_changes_async(self) -> None:
+        state = self._coding_state()
+        if state["busy"]:
+            return
+        project_id = self.current_project_id
+        project = self.project_service.db.get_project(project_id)
+        run_id = state["run_id"]
+
+        def on_snapshot(snapshot):
+            if state["run_id"] != run_id:
+                return
+            self._apply_coding_snapshot(state, snapshot)
+            if self._coding_visible(project_id):
+                self._refresh_coding_changes()
+                self._render_coding_files(snapshot)
+
+        def on_error(error):
+            if state["run_id"] != run_id:
+                return
+            state["inspection_warning"] = f"Dosyalar karşılaştırılamadı: {error}"
+            if self._coding_visible(project_id):
+                self._refresh_coding_changes()
+
+        self.service.inspect_workspace_async(project.local_path, on_snapshot, on_error, before=state["before"])
+
+    def _refresh_coding_files_async(self) -> None:
+        project_id = self.current_project_id
+        project = self.project_service.db.get_project(project_id)
+        files_list = self.coding_files_list
+
+        def on_snapshot(snapshot):
+            if self._coding_visible(project_id) and self.coding_files_list is files_list:
+                self._render_coding_files(snapshot)
+
+        def on_error(error):
+            if self._coding_visible(project_id) and self.coding_files_list is files_list:
+                ctk.CTkLabel(files_list, text=f"Dosyalar yüklenemedi: {error}", wraplength=350).pack(anchor="w")
+
+        self.service.inspect_workspace_async(project.local_path, on_snapshot, on_error)
+
+    def _render_coding_files(self, snapshot) -> None:
+        for widget in self.coding_files_list.winfo_children():
+            widget.destroy()
+        if not snapshot.files:
+            ctk.CTkLabel(self.coding_files_list, text="Gösterilecek kaynak dosya bulunamadı.").pack(anchor="w")
+        if snapshot.limited or snapshot.skipped:
+            ctk.CTkLabel(self.coding_files_list, text="Dosya listesi kısmi; büyük ve okunamayan dosyalar atlandı.", wraplength=350).pack(anchor="w")
+        for path in snapshot.files:
+            ctk.CTkButton(self.coding_files_list, text=path, anchor="w", height=26, fg_color="transparent",
+                          command=lambda p=path: self._preview_coding_file(p)).pack(fill="x", pady=1)
+
+    def _preview_coding_file(self, relative_path: str) -> None:
+        project = self.project_service.db.get_project(self.current_project_id)
+        try:
+            path = workspace_path(project.local_path, relative_path)
+            if is_sensitive_file(path):
+                raise ValueError("Bu dosya kaynak önizlemesine dahil edilmiyor. Editörde açabilirsiniz.")
+            with path.open("rb") as stream:
+                data = stream.read(1024 * 1024 + 1)
+            if len(data) > 1024 * 1024 or b"\x00" in data:
+                raise ValueError("Bu dosya önizleme için çok büyük veya metin dosyası değil. Editörde açabilirsiniz.")
+            content = data.decode("utf-8")
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Dosya Önizlemesi", str(error))
+            return
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(relative_path)
+        dialog.geometry("850x600")
+        dialog.transient(self.winfo_toplevel())
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_rowconfigure(1, weight=1)
+        ctk.CTkLabel(dialog, text=relative_path, anchor="w").grid(row=0, column=0, sticky="ew", padx=12, pady=8)
+        box = ctk.CTkTextbox(dialog, wrap="none", font=ctk.CTkFont(family="monospace", size=12))
+        box.grid(row=1, column=0, sticky="nsew", padx=12)
+        numbered = "\n".join(f"{number:4}  {line}" for number, line in enumerate(content.splitlines(), 1))
+        box.insert("end", numbered)
+        box.configure(state="disabled")
+        editor = dict(self.service.config.get("coding_editor", {}))
+
+        def open_file():
+            try:
+                open_in_editor(editor.get("name", "VS Code"), path, editor.get("path", ""))
+            except (OSError, ValueError) as error:
+                messagebox.showerror("Editör Açılamadı", str(error))
+
+        ctk.CTkButton(dialog, text="Editörde Aç", command=open_file).grid(row=2, column=0, sticky="e", padx=12, pady=10)
+
+    def _refresh_coding_activity(self) -> None:
+        for widget in self.coding_activity_list.winfo_children():
+            widget.destroy()
+        activities = self._coding_state()["activities"]
+        if not activities:
+            ctk.CTkLabel(self.coding_activity_list, text="Ajanın komutları ve araç sonuçları burada görünür.", wraplength=350).pack(anchor="w")
+        for activity in activities:
+            card = ctk.CTkFrame(self.coding_activity_list)
+            card.pack(fill="x", pady=4)
+            header = ctk.CTkFrame(card, fg_color="transparent")
+            header.pack(fill="x", padx=8, pady=4)
+            header.grid_columnconfigure(0, weight=1)
+            color = {"Çalışıyor": "#f59e0b", "Tamamlandı": "#10b981", "Hata": "#f87171"}.get(activity["status"], "#94a3b8")
+            duration = f" · {activity['duration_ms'] / 1000:.2f} sn" if activity.get("duration_ms") is not None else ""
+            ctk.CTkLabel(header, text=f"{activity['tool']} · {activity['status']}{duration}", text_color=color, anchor="w").grid(row=0, column=0, sticky="ew")
+            ctk.CTkButton(header, text="Detay", width=55, height=24,
+                          command=lambda a=activity: self._show_coding_activity(a)).grid(row=0, column=1)
+            args = activity["arguments"]
+            detail = args.get("command") or args.get("path") or ""
+            if detail:
+                ctk.CTkLabel(card, text=redact_secrets(str(detail))[:500], anchor="w", justify="left", wraplength=350).pack(fill="x", padx=8, pady=(0, 6))
+
+    def _show_coding_activity(self, activity: Dict[str, Any]) -> None:
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"{activity['tool']} · {activity['status']}")
+        dialog.geometry("800x550")
+        dialog.transient(self.winfo_toplevel())
+        box = ctk.CTkTextbox(dialog, wrap="word", font=ctk.CTkFont(family="monospace", size=12))
+        box.pack(fill="both", expand=True, padx=12, pady=12)
+        args = json.dumps(activity["arguments"], indent=2, ensure_ascii=False)
+        content = f"Parametreler:\n{args}\n\nÇıktı:\n{activity.get('output') or 'Sonuç bekleniyor.'}"
+        box.insert("end", redact_secrets(content))
+        box.configure(state="disabled")
+
 
     def _coding_state(self) -> Dict[str, Any]:
         if self.current_project_id not in self._coding_states:
             self._coding_states[self.current_project_id] = {
                 "session": self.service.get_or_create_session(None), "busy": False,
                 "text": "=== EVREN CODING AGENT WORKSPACE ===\n\nBir görevi seçip 'Ajan ile Başlat' diyebilir veya doğrudan talimat yazabilirsiniz.\n",
+                "status": "Hazır", "activities": [], "changes": [], "before": None,
+                "snapshot": None, "inspection_warning": "", "selected_change": None,
+                "run_id": 0,
             }
         return self._coding_states[self.current_project_id]
 
@@ -952,7 +1281,6 @@ class ProjectsView(ctk.CTkFrame):
         settings = db.get_settings(project_id)
         if prepared:
             session.system_prompt = prepared["system_prompt"]
-            session.model = prepared["model"] or self.service.default_model
         elif not session.messages:
             builder = ProjectContextBuilder(
                 project=db.get_project(project_id), settings=settings,
@@ -963,19 +1291,28 @@ class ProjectsView(ctk.CTkFrame):
                 "You are the Evren Coding Agent. Answer in Turkish. Use the project path "
                 "as cwd for project commands. Inspect, implement, verify and summarize the requested work."
             )
-            session.model = settings.coding_model or self.service.default_model
+        session.model = settings.coding_model or self.service.default_model
         project = db.get_project(project_id)
         workspace_hint = f"\nProject workspace path: {project.local_path}\nUse this absolute path as cwd for project commands."
         if workspace_hint not in session.system_prompt:
             session.system_prompt += workspace_hint
         state["busy"] = True
+        state["run_id"] += 1
+        state["before"] = None
+        state["changes"] = []
+        state["activities"] = []
+        state["inspection_warning"] = ""
+        state["selected_change"] = None
+        state["status"] = "Çalışma öncesi dosyalar okunuyor…"
         state["text"] += f"\n[Siz]: {prompt}\n[evren]: "
         chunks = []
         ended = False
+        failed = False
+        live_pending = False
+        live_dirty = False
 
         def refresh():
-            if (self.current_project_id == project_id and self.active_workspace_tab == "coding"
-                    and self.coding_chat_box.winfo_exists()):
+            if self._coding_visible(project_id):
                 previous = self._coding_rendered_text
                 if state["text"].startswith(previous):
                     self.coding_chat_box.insert("end", state["text"][len(previous):])
@@ -986,6 +1323,60 @@ class ProjectsView(ctk.CTkFrame):
                 self.coding_chat_box.see("end")
                 self.coding_send_btn.configure(state="disabled" if state["busy"] else "normal",
                                        text="Bekleyin…" if state["busy"] else "Gönder")
+                self.coding_model_combo.configure(state="disabled" if state["busy"] else "readonly")
+                self.coding_status_label.configure(text=state["status"])
+                self.coding_refresh_changes_btn.configure(state="disabled" if state["busy"] else "normal")
+
+        def refresh_details():
+            if self._coding_visible(project_id):
+                self._refresh_coding_activity()
+                self._refresh_coding_changes()
+
+        def complete_inspection(snapshot=None, error=None):
+            if snapshot is not None:
+                self._apply_coding_snapshot(state, snapshot)
+            if error:
+                state["inspection_warning"] = f"Dosyalar karşılaştırılamadı: {error}"
+            state["busy"] = False
+            tool_errors = sum(a["status"] == "Hata" for a in state["activities"])
+            state["status"] = "Çalışma hata ile sona erdi" if failed else (
+                f"Tamamlandı · {len(state['changes'])} dosya değişti · {tool_errors} araç hatası"
+                if tool_errors else f"Tamamlandı · {len(state['changes'])} dosya değişti"
+            )
+            if not failed and (error or state["before"] is None):
+                state["status"] = "Tamamlandı · Dosya farkları doğrulanamadı"
+            for activity in state["activities"]:
+                if activity["status"] == "Çalışıyor":
+                    activity["status"] = "Kesildi"
+            refresh()
+            refresh_details()
+            if snapshot is not None and self._coding_visible(project_id):
+                self._render_coding_files(snapshot)
+
+        def inspect_live_changes():
+            nonlocal live_pending, live_dirty
+            live_dirty = True
+            if live_pending or ended or state["before"] is None:
+                return
+            live_pending = True
+            live_dirty = False
+
+            def receive(snapshot=None, error=None):
+                nonlocal live_pending
+                live_pending = False
+                if ended:
+                    return
+                if snapshot is not None:
+                    self._apply_coding_snapshot(state, snapshot)
+                if error:
+                    state["inspection_warning"] = f"Dosyalar karşılaştırılamadı: {error}"
+                refresh_details()
+                if live_dirty:
+                    inspect_live_changes()
+
+            self.service.inspect_workspace_async(
+                project.local_path, receive, lambda error: receive(error=error), before=state["before"],
+            )
 
         def finish(text):
             nonlocal ended
@@ -997,10 +1388,21 @@ class ProjectsView(ctk.CTkFrame):
             elif not chunks and not text:
                 state["text"] += "Yanıt metni alınamadı. Model ve bağlantı ayarlarını kontrol edin."
             state["text"] += "\n"
-            state["busy"] = False
+            state["status"] = "Dosya değişiklikleri karşılaştırılıyor…"
             refresh()
+            self.service.inspect_workspace_async(
+                project.local_path, complete_inspection,
+                lambda error: complete_inspection(error=error),
+                before=state["before"],
+            )
+
+        def finish_error(error):
+            nonlocal failed
+            failed = True
+            finish(f"Hata: {error}")
 
         def on_event(evt):
+            nonlocal failed
             if ended:
                 return
             if evt.type == AgentEventType.TEXT_DELTA and evt.content:
@@ -1009,10 +1411,36 @@ class ProjectsView(ctk.CTkFrame):
                 refresh()
             elif evt.type == AgentEventType.TOOL_CALL_STARTED:
                 state["text"] += f"\n[Araç: {evt.tool_name}]\n"
+                arguments = {key: value[:8000] if isinstance(value, str) else value
+                             for key, value in (evt.arguments or {}).items()}
+                state["activities"].append({"tool": evt.tool_name or "Araç", "arguments": arguments,
+                                             "status": "Çalışıyor", "output": "", "duration_ms": None})
+                state["activities"] = state["activities"][-100:]
+                state["status"] = f"Ajan çalışıyor · {evt.tool_name}"
                 refresh()
-            elif evt.type in (AgentEventType.ERROR, AgentEventType.TOOL_CALL_ERROR, AgentEventType.MCP_ERROR):
+                refresh_details()
+            elif evt.type in (AgentEventType.TOOL_CALL_RESULT, AgentEventType.TOOL_CALL_ERROR):
+                activity = next((a for a in reversed(state["activities"])
+                                 if a["tool"] == evt.tool_name and a["status"] == "Çalışıyor"), None)
+                output = evt.content or ""
+                exit_code = re.match(r"Exit code (-?\d+):", output)
+                tool_failed = (evt.type == AgentEventType.TOOL_CALL_ERROR
+                               or output.startswith(("Error:", "Error reading file:", "Error writing file:", "Command execution error:", "Command timed out"))
+                               or (exit_code is not None and int(exit_code.group(1)) != 0))
+                if activity is not None:
+                    activity.update(status="Hata" if tool_failed else "Tamamlandı",
+                                    output=redact_secrets(output[:16000]) + ("\n… Çıktı kısaltıldı." if len(output) > 16000 else ""),
+                                    duration_ms=evt.duration_ms)
+                if tool_failed:
+                    state["text"] += f"\nAraç hatası ({evt.tool_name}): {redact_secrets(output[:500])}\n"
+                state["status"] = "Yanıt hazırlanıyor…"
+                refresh()
+                refresh_details()
+                inspect_live_changes()
+            elif evt.type in (AgentEventType.ERROR, AgentEventType.MCP_ERROR):
                 state["text"] += f"\nHata: {evt.content}\n"
                 if evt.type == AgentEventType.ERROR:
+                    failed = True
                     finish("")
                 else:
                     refresh()
@@ -1020,15 +1448,24 @@ class ProjectsView(ctk.CTkFrame):
                 finish(evt.content)
 
         refresh()
-        try:
-            self.service.chat_agent_stream_async(
-                session_id=session.session_id, prompt=prompt,
-                cwd=project.local_path if project else None,
-                on_event=on_event, on_done=finish,
-                on_error=lambda error: finish(f"Hata: {error}"),
-            )
-        except Exception as error:
-            finish(f"Hata: {error}")
+        refresh_details()
+
+        def start(snapshot=None, error=None):
+            state["before"] = snapshot
+            if error:
+                state["inspection_warning"] = f"Başlangıç dosyaları okunamadı: {error}"
+            state["status"] = "Ajan çalışıyor…"
+            refresh()
+            try:
+                self.service.chat_agent_stream_async(
+                    session_id=session.session_id, prompt=prompt,
+                    cwd=project.local_path if project else None,
+                    on_event=on_event, on_done=finish, on_error=finish_error,
+                )
+            except Exception as error:
+                finish_error(str(error))
+
+        self.service.inspect_workspace_async(project.local_path, start, lambda error: start(error=error))
 
     # =========================================================================
     # TAB: GÖREVLER & KANBAN (TASKS)

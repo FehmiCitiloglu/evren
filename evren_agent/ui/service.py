@@ -38,6 +38,7 @@ from evren_agent.mcp.models import (
     store_mcp_secret,
 )
 from evren_agent.projects.service import ProjectService
+from evren_agent.projects.workspace import WorkspaceSnapshot, capture_workspace, compare_workspaces
 
 
 
@@ -210,6 +211,29 @@ class EvrenService:
                     self._dispatch(on_error, turkce_hata_mesaji(e))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def inspect_workspace_async(
+        self, path: str | Path, on_success: Callable[[WorkspaceSnapshot], None],
+        on_error: Callable[[str], None], before: Optional[WorkspaceSnapshot] = None,
+    ) -> None:
+        """Read source files off the GUI thread; dispatch results on the GUI thread."""
+        def worker():
+            try:
+                snapshot = capture_workspace(path)
+                if before is not None:
+                    snapshot.changes = compare_workspaces(before, snapshot)
+                self._dispatch(on_success, snapshot)
+            except Exception as error:
+                self._dispatch(on_error, str(error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def set_coding_editor(self, editor: str, custom_path: str = "") -> None:
+        config = dict(self.config, coding_editor={"name": editor, "path": custom_path})
+        if self.config_path is not None:
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        save_config(config, self.config_path)
+        self.config = config
 
     def fetch_quota_async(
         self,
@@ -852,4 +876,3 @@ class EvrenService:
         except Exception:
             pass
         self.runtime.shutdown(wait=True)
-

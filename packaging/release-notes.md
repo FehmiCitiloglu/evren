@@ -1,8 +1,11 @@
-## v0.2.5 değişiklikleri
+## v0.2.6 değişiklikleri
 
-- Proje çalışma alanında duyarlı yerleşim ve akış halinde ajan sohbeti.
-- Varsayılan reranker modeli Qwen3 olarak güncellendi.
-- Windows'ta sayısal Enter tuşu testi, Tk'nin yerel tuş eşlemesine göre düzeltildi.
+- Kodlama ajanında proje bazında kaydedilen model seçimi; devam eden sohbetlerde yeni modelle devam etme.
+- Eklenen, değişen ve silinen dosyalar için otomatik yenilenen, renkli önce/sonra fark görünümü.
+- Komutları, araç parametrelerini, çıktıları, süreleri ve hataları gösteren canlı işlem kaydı.
+- Alt klasörlerdeki kaynak dosyaların listesi ve satır numaralı dosya önizlemesi.
+- Projeyi ve seçili dosyayı VS Code, Cursor, Zed veya özel editörde açma; editör tercihini kaydetme.
+- Küçük pencerelerde fark görünümünü kullanılabilir tutan kompakt yerleşim.
 
 ## Masaüstü kurulumu
 

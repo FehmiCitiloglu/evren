@@ -154,6 +154,14 @@ Grafik ortamda çift tıklayarak çalıştırmak için:
 - 🔌 **Gelişmiş MCP Yöneticisi:** Yerel (`stdio`) ve uzak (`sse`/`streamable_http`) Model Context Protocol sunucularını görsel olarak ekleme, test etme, araç şemalarını inceleme, canlı logları izleme, işletim sistemi kasasında (`keyring`) güvenli token saklama ve her sohbet oturumuna özel bağımsız araç seçimi (per-chat MCP isolation).
 - ⚙️ **Ayarlar:** API taban adresi yapılandırması, API anahtarını işletim sisteminin şifreli kasasında (macOS Keychain, Windows Credential Manager, Linux Secret Service) saklama, açık/koyu tema ve arayüz ölçeklendirme.
 
+### Projeler: Kodlama Ajanı
+
+Projenin **Kodlama Ajanı** sekmesinde model seçimi proje bazında kaydedilir. **Değişiklikler**, her çalışma başlangıcındaki dosyalarla karşılaştırarak eklenen, değişen ve silinen dosyaları; yeşil/kırmızı satır farklarını gösterir. Araç işlemlerinden sonra ve çalışma sonunda otomatik güncellenir. Git deposu olmayan projelerde de çalışır. **İşlemler** sekmesinden araç parametreleri, komut çıktısı, çalışma süresi ve hatalar incelenebilir. **Dosyalar** alt klasörlerdeki kaynak dosyaları listeler ve satır numaralı önizleme açar.
+
+**Editör** alanından VS Code, Cursor, Zed, sistem varsayılanı veya özel bir uygulama seçin; **Projeyi Aç** ile proje klasörünü, fark görünümündeki veya önizlemedeki açma düğmesiyle ilgili dosyayı açın. Editör tercihi kaydedilir. Özel editör için çalıştırılabilir uygulama dosyasını seçin.
+
+Karşılaştırma son çalışma süresindeki kaynak dosya değişikliklerini gösterir; aynı sırada dışarıdan yapılan düzenlemeler de bu karşılaştırmaya dahildir. Gizli dosyalar, bağımlılık/derleme klasörleri ve ikili dosyalar taramaya dahil edilmez. Tarama 2000 dosya, dosya başına 1 MB ve toplam 20 MB ile sınırlıdır; eksik karşılaştırmalar arayüzde belirtilir. İşlem görünümü son çalışmanın en son 100 araç çağrısını tutar.
+
 ### Masaüstü MCP Yöneticisi (Desktop MCP Manager)
 
 EVREN Masaüstü uygulaması, sol menüdeki **🔌 MCP** sekmesi üzerinden tam teşekküllü bir MCP sunucu yönetim merkezi sunar:
