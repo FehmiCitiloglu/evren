@@ -8,6 +8,10 @@ on:
       tag_name:
         description: 'Existing version tag (for example v0.2.1)'
         required: true
+      signing_check_only:
+        description: 'Validate Apple certificate and notarization credentials without publishing a release'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,7 +21,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  check-apple-signing:
+    if: inputs.signing_check_only == true
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Validate Developer ID and Apple notarization credentials
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: python scripts/setup_macos_signing.py
+      - name: Remove temporary Apple signing credentials
+        if: always()
+        shell: bash
+        run: |
+          signing_keychain="$RUNNER_TEMP/evren-signing.keychain-db"
+          if [[ -f "$signing_keychain" ]]; then
+            security delete-keychain "$signing_keychain"
+          fi
+          rm -f "$RUNNER_TEMP/evren-signing.p12"
+
   build-desktop:
+    if: inputs.signing_check_only != true
     name: Desktop (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 100
@@ -105,6 +139,7 @@ jobs:
           rm -f "$RUNNER_TEMP/evren-signing.p12"
 
   build-python:
+    if: inputs.signing_check_only != true
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
@@ -123,6 +158,7 @@ jobs:
           if-no-files-found: error
 
   publish-release:
+    if: inputs.signing_check_only != true
     needs: [build-desktop, build-python]
     runs-on: ubuntu-22.04
     timeout-minutes: 10

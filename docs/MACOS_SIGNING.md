@@ -77,6 +77,12 @@ unsigned fallback. Credentials are removed in an `always()` cleanup step.
 Notarization JSON reports are separate workflow artifacts, not release assets.
 The same five secrets work for both Mac architectures.
 
+To validate the imported certificate, private key, matching Team ID and actual
+Apple notarization login without building or publishing a release, manually run
+Desktop Release with `signing_check_only` enabled. The tag input is unused in
+this mode. This check uses the selected workflow ref's source, then removes its
+temporary Keychain. Normal release runs still check out the requested tag.
+
 Commit and push the workflow, scripts, and spec changes before creating the next
 version tag. Manual reruns still check out the requested tag: rerunning an old
 tag will use its old source and packaging scripts. Existing published releases
