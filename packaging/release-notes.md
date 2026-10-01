@@ -1,3 +1,9 @@
+## v0.2.15 değişiklikleri
+
+- Apple Silicon ve Intel macOS kurulumları Developer ID sertifikasıyla imzalanır ve Apple noter onayından geçer.
+- Apple onay bileti uygulamaya ve DMG paketine eklenir; paketler yayınlanmadan önce Gatekeeper ve imza kontrolleri yapılır.
+- Release akışı geçici imzalama anahtarlığı kullanır ve işlem sonunda kimlik bilgilerini temizler.
+
 ## v0.2.14 değişiklikleri
 
 - Model yanıtları Markdown olarak gösterilir: başlıklar, kalın/italik metin, listeler, alıntılar ve bağlantılar biçimlendirilir.
