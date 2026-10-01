@@ -86,9 +86,9 @@ def test_inspection_runs_on_worker_and_dispatches_gui_callback(tmp_path, missing
     from types import SimpleNamespace
     from evren_agent.ui.service import EvrenService
 
-    (tmp_path / "main.py").write_text("pass\n")
+    (tmp_path / "main.py").write_bytes(b"pass\n")
     before = capture_workspace(tmp_path)
-    (tmp_path / "main.py").write_text("value = True\n")
+    (tmp_path / "main.py").write_bytes(b"value = True\n")
     dispatched = []
     ready = threading.Event()
     gui_thread = threading.get_ident()

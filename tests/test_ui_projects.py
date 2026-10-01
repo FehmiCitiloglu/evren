@@ -26,6 +26,7 @@ def synchronous_workspace_inspection(monkeypatch):
 
 
 def test_projects_view_full_lifecycle(monkeypatch):
+    original_cwd = Path.cwd()
     monkeypatch.setattr("tkinter.messagebox.showinfo", lambda *a, **k: None)
     monkeypatch.setattr("tkinter.messagebox.showwarning", lambda *a, **k: None)
     monkeypatch.setattr("tkinter.messagebox.showerror", lambda *a, **k: None)
@@ -153,6 +154,7 @@ def test_projects_view_full_lifecycle(monkeypatch):
             if hasattr(app, "service") and hasattr(app.service, "projects") and hasattr(app.service.projects, "scheduler"):
                 app.service.projects.scheduler.stop()
             app.destroy()
+            monkeypatch.chdir(original_cwd)
 
 
 def test_coding_model_selection_persists_and_applies_to_existing_session(tmp_path, monkeypatch):

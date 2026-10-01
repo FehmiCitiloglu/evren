@@ -1,4 +1,4 @@
-## v0.2.6 değişiklikleri
+## v0.2.7 değişiklikleri
 
 - Kodlama ajanında proje bazında kaydedilen model seçimi; devam eden sohbetlerde yeni modelle devam etme.
 - Eklenen, değişen ve silinen dosyalar için otomatik yenilenen, renkli önce/sonra fark görünümü.
@@ -6,6 +6,7 @@
 - Alt klasörlerdeki kaynak dosyaların listesi ve satır numaralı dosya önizlemesi.
 - Projeyi ve seçili dosyayı VS Code, Cursor, Zed veya özel editörde açma; editör tercihini kaydetme.
 - Küçük pencerelerde fark görünümünü kullanılabilir tutan kompakt yerleşim.
+- Windows CI testlerinde geçici klasör temizliği ve satır sonu uyumluluğu düzeltildi.
 
 ## Masaüstü kurulumu
 
