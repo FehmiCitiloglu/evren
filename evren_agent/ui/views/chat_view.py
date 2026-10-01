@@ -7,6 +7,8 @@ Tüm etiket ve açıklamalar Türkçedir.
 from __future__ import annotations
 
 import datetime
+import base64
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -19,7 +21,7 @@ from PIL import Image
 
 from evren_agent.core.events import AgentEvent, AgentEventType
 from evren_agent.core.session import ChatSession
-from evren_agent.ui.components.tool_card import ToolActivityBubble
+from evren_agent.ui.components.tool_card import ToolActivityGroup
 from evren_agent.ui.service import EvrenService
 from evren_agent.ui.theme import THEME_COLORS
 
@@ -122,6 +124,7 @@ class ChatMessageBubble(ctk.CTkFrame):
         content: str,
         image_path: Optional[str] = None,
         timestamp: Optional[str] = None,
+        image_data_url: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
         is_user = (role == "user")
@@ -149,7 +152,7 @@ class ChatMessageBubble(ctk.CTkFrame):
         header_frame.pack(fill="x", padx=12, pady=(8, 4))
 
         sender_title = "Siz" if is_user else "evren"
-        sender_color = "#93c5fd" if is_user else "#38bdf8"
+        sender_color = "#dbeafe" if is_user else colors["accent_secondary"]
         sender_label = ctk.CTkLabel(
             header_frame,
             text=sender_title,
@@ -162,7 +165,7 @@ class ChatMessageBubble(ctk.CTkFrame):
             header_frame,
             text=self.timestamp,
             font=ctk.CTkFont(size=11),
-            text_color=colors["text_muted"],
+            text_color="#dbeafe" if is_user else colors["text_secondary"],
         )
         time_label.pack(side="left", padx=8)
 
@@ -175,21 +178,26 @@ class ChatMessageBubble(ctk.CTkFrame):
             font=ctk.CTkFont(size=11),
             fg_color="transparent",
             hover_color=colors["bg_hover"],
-            text_color=colors["text_secondary"],
+            text_color="#ffffff" if is_user else colors["text_secondary"],
             command=self._copy_to_clipboard,
         )
         copy_btn.pack(side="right")
 
         # Varsa Görsel Önizlemesi
-        if image_path and os.path.exists(image_path):
+        if image_path or image_data_url:
             try:
-                pil_img = Image.open(image_path)
+                if image_path and os.path.exists(image_path):
+                    pil_img = Image.open(image_path)
+                elif image_data_url:
+                    pil_img = Image.open(BytesIO(base64.b64decode(image_data_url.split(",", 1)[1])))
+                else:
+                    raise FileNotFoundError(image_path)
                 pil_img.thumbnail((240, 180))
                 ctk_thumb = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=pil_img.size)
                 img_lbl = ctk.CTkLabel(self, image=ctk_thumb, text="")
                 img_lbl.pack(anchor="w", padx=12, pady=4)
             except Exception:
-                img_name = Path(image_path).name
+                img_name = Path(image_path).name if image_path else "Görsel"
                 err_lbl = ctk.CTkLabel(self, text=f"📷 [Ekli Görsel: {img_name}]", font=ctk.CTkFont(size=11))
                 err_lbl.pack(anchor="w", padx=12, pady=4)
 
@@ -197,13 +205,22 @@ class ChatMessageBubble(ctk.CTkFrame):
         self.text_label = ctk.CTkLabel(
             self,
             text=content,
-            font=ctk.CTkFont(size=13),
-            text_color=colors["text_primary"],
+            font=ctk.CTkFont(size=14),
+            text_color="#ffffff" if is_user else colors["text_primary"],
+            width=1,
             wraplength=700,
             justify="left",
             anchor="w",
         )
         self.text_label.pack(fill="x", padx=12, pady=(2, 10))
+        self._wraplength = 700
+        self.bind("<Configure>", self._resize_text, add="+")
+
+    def _resize_text(self, event: Any) -> None:
+        width = max(40, int(event.width / self._get_widget_scaling()) - 24)
+        if width != self._wraplength:
+            self._wraplength = width
+            self.text_label.configure(wraplength=width)
 
     def update_text(self, new_text: str) -> None:
         """Akış sırasında metni dinamik günceller."""
@@ -225,17 +242,27 @@ class ChatView(ctk.CTkFrame):
         self.messages: List[Dict[str, Any]] = []
         self.attached_image_path: Optional[str] = None
         self.current_bot_bubble: Optional[ChatMessageBubble] = None
-        self._current_tool_bubble: Optional[ToolActivityBubble] = None
+        self._stream_token: Optional[object] = None
+        self._current_activity: Optional[ToolActivityGroup] = None
+        self._scroll_job: Optional[str] = None
+        self._scroll_force = False
+        self._save_job: Optional[str] = None
+        self._current_bot_record: Optional[Dict[str, Any]] = None
+        self._history_ids: Dict[str, str] = {}
         self.is_streaming = False
 
         self._build_ui()
         self._load_models()
         self.service.add_mcp_listener(self._update_mcp_chips)
         self._update_mcp_chips()
+        self._refresh_history()
+        history = self.service.list_chat_history()
+        if history:
+            self._restore_chat(history[0]["session_id"])
 
     def _build_ui(self) -> None:
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)  # Mesaj alanı esner
+        self.grid_rowconfigure(3, weight=1)  # Mesaj alanı esner; diğer satırlar sabittir
 
         # 1. ÜST PANEL: Model Seçimi, MCP Seçimi, Parametreler ve Aksiyon Butonları
         top_bar = ctk.CTkFrame(self, fg_color=("gray90", "#1e293b"), corner_radius=10)
@@ -285,13 +312,13 @@ class ChatView(ctk.CTkFrame):
         # Sağ Taraf Butonları: Yeni Sohbet & Dışa Aktar & Temizle
         clear_btn = ctk.CTkButton(
             top_bar,
-            text="Temizle",
+            text="Sohbeti sil",
             width=70,
             height=28,
             fg_color="transparent",
             text_color=("gray30", "#94a3b8"),
             hover_color=("gray80", "#334155"),
-            command=self.clear_chat,
+            command=self._delete_chat,
         )
         clear_btn.pack(side="right", padx=(4, 12), pady=10)
 
@@ -317,6 +344,18 @@ class ChatView(ctk.CTkFrame):
             command=self.new_chat,
         )
         new_chat_btn.pack(side="right", padx=4, pady=10)
+
+        history_bar = ctk.CTkFrame(self, fg_color="transparent")
+        history_bar.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 4))
+        history_bar.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(history_bar, text="Sohbet geçmişi", font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(0, 10))
+        self.history_combo = ctk.CTkComboBox(history_bar, values=["Yeni sohbet"], height=28,
+                                            state="readonly", command=self._select_history)
+        self.history_combo.grid(row=0, column=1, sticky="ew")
+        self.history_combo.set("Yeni sohbet")
+        self.history_status = ctk.CTkLabel(history_bar, text="", font=ctk.CTkFont(size=11),
+                                          text_color=("gray40", "#94a3b8"))
+        self.history_status.grid(row=0, column=2, padx=(10, 0))
 
         # 2. KATLANABİLİR PARAMETRE PANELİ
         self.params_frame = ctk.CTkFrame(self, fg_color=("gray95", "#161f2e"), corner_radius=8)
@@ -383,7 +422,7 @@ class ChatView(ctk.CTkFrame):
             fg_color="transparent",
             corner_radius=0,
         )
-        self.chat_scroll.grid(row=1, column=0, sticky="nsew", padx=16, pady=4)
+        self.chat_scroll.grid(row=3, column=0, sticky="nsew", padx=16, pady=4)
         self.chat_scroll.grid_columnconfigure(0, weight=1)
 
         # Hoş Geldiniz Mesaj Kartı
@@ -391,7 +430,7 @@ class ChatView(ctk.CTkFrame):
 
         # 3.5. AKTİF MCP ÇİPLERİ (CHIPS) ÇUBUĞU
         self.chips_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.chips_frame.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 2))
+        self.chips_frame.grid(row=4, column=0, sticky="ew", padx=16, pady=(0, 2))
 
         # 4. EKLİ GÖRSEL ÇUBUĞU (Varsa gösterilir)
         self.img_tray = ctk.CTkFrame(self, fg_color=("gray85", "#243044"), corner_radius=8, height=36)
@@ -416,7 +455,7 @@ class ChatView(ctk.CTkFrame):
 
         # 5. ALT GİRDİ PANELİ
         bottom_box = ctk.CTkFrame(self, fg_color=("gray90", "#1e293b"), corner_radius=12)
-        bottom_box.grid(row=4, column=0, sticky="ew", padx=16, pady=(4, 12))
+        bottom_box.grid(row=6, column=0, sticky="ew", padx=16, pady=(4, 12))
         bottom_box.grid_columnconfigure(1, weight=1)
 
         # Görsel Ekle Butonu
@@ -465,7 +504,7 @@ class ChatView(ctk.CTkFrame):
             font=ctk.CTkFont(size=10),
             text_color=("gray50", "gray60"),
         )
-        hint_lbl.grid(row=5, column=0, sticky="w", padx=22, pady=(0, 6))
+        hint_lbl.grid(row=7, column=0, sticky="w", padx=22, pady=(0, 6))
 
     def _open_mcp_selector(self) -> None:
         MCPChatSelectorDialog(self, service=self.service, session=self.session, on_changed=self._update_mcp_chips)
@@ -515,6 +554,7 @@ class ChatView(ctk.CTkFrame):
             border_color=("gray85", "#334155"),
         )
         welcome.pack(fill="x", padx=16, pady=24)
+        self._welcome_card = welcome
 
         t_lbl = ctk.CTkLabel(
             welcome,
@@ -544,8 +584,7 @@ class ChatView(ctk.CTkFrame):
             self.toggle_params_btn.configure(text="Parametreler ▼")
             self.params_visible = False
         else:
-            self.params_frame.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 6))
-            self.chat_scroll.grid(row=2, column=0, sticky="nsew", padx=16, pady=4)
+            self.params_frame.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 6))
             self.toggle_params_btn.configure(text="Parametreler ▲")
             self.params_visible = True
 
@@ -559,16 +598,121 @@ class ChatView(ctk.CTkFrame):
         """API'den modelleri listeler."""
         def on_models(models: List[str]):
             if models:
-                self.model_combo.configure(values=models)
-                if self.service.default_model in models:
-                    self.model_combo.set(self.service.default_model)
-                else:
-                    self.model_combo.set(models[0])
+                selected = self.model_combo.get() or self.session.model
+                self.model_combo.configure(values=models if selected in models else [selected, *models])
+                self.model_combo.set(selected)
 
         self.service.fetch_models_async(on_success=on_models)
 
     def _on_model_selected(self, model: str) -> None:
-        pass
+        self.session.model = model
+        self._save_history()
+
+    def _refresh_history(self) -> None:
+        self._history_ids.clear()
+        selected = "Yeni sohbet"
+        for record in self.service.list_chat_history():
+            date = datetime.datetime.fromtimestamp(record["updated_at"]).strftime("%d.%m.%Y %H:%M")
+            base = f"{record['title'][:48]} · {date}"
+            label = base
+            index = 2
+            while label in self._history_ids:
+                label = f"{base} ({index})"
+                index += 1
+            self._history_ids[label] = record["session_id"]
+            if record["session_id"] == self.session.session_id:
+                selected = label
+        self.history_combo.configure(values=list(self._history_ids) or ["Yeni sohbet"])
+        self.history_combo.set(selected)
+        if not self.messages:
+            self.history_status.configure(text="")
+
+    def _select_history(self, label: str) -> None:
+        session_id = self._history_ids.get(label)
+        if session_id and session_id != self.session.session_id and not self.is_streaming:
+            self._restore_chat(session_id)
+
+    def _restore_chat(self, session_id: str) -> None:
+        if not self._save_history():
+            return
+        records = self.service.load_chat_transcript(session_id)
+        if not records:
+            return
+        session = self.service.restore_chat_session(session_id)
+        self.clear_chat(reset_session=False)
+        self.session = session
+        self._welcome_card.destroy()
+        self._welcome_card = None
+        self.messages = records
+        for record in records:
+            content = record.get("content", "")
+            image_data_url = None
+            if isinstance(content, list):
+                image_data_url = next((part.get("image_url", {}).get("url") for part in content
+                                       if part.get("type") == "image_url"), None)
+                content = "\n".join(part.get("text", "") for part in content if part.get("type") == "text")
+            if record.get("pending"):
+                content = (content + "\n\nYanıt kesildi. Bu sohbetten devam edebilirsiniz.").strip()
+                record.update(content=content, pending=False)
+            bubble = self._add_message(record["role"], content, record.get("image_path"), record.get("timestamp"), image_data_url)
+            if record.get("activity"):
+                activity = ToolActivityGroup.from_record(bubble, record["activity"])
+                activity.pack(fill="x", padx=12, pady=(0, 6), before=bubble.text_label)
+                record["activity"] = activity.to_record()
+        self.model_combo.set(session.model)
+        self.temp_slider.set(session.temperature)
+        self._on_temp_change(session.temperature)
+        self.tokens_slider.set(session.max_tokens)
+        self._on_tokens_change(session.max_tokens)
+        self.sys_entry.delete(0, "end")
+        self.sys_entry.insert(0, session.system_prompt)
+        self._update_mcp_chips()
+        self._refresh_history()
+        self.history_status.configure(text="Kayıt açıldı", text_color=("gray40", "#94a3b8"))
+        self._scroll_to_bottom(force=True)
+
+    def _schedule_save(self) -> None:
+        if self._save_job is None and self.is_streaming:
+            self.history_status.configure(text="Kaydediliyor…", text_color=("gray40", "#94a3b8"))
+            self._save_job = self.after(700, self._save_history)
+
+    def _save_history(self) -> bool:
+        if self._save_job is not None:
+            self.after_cancel(self._save_job)
+            self._save_job = None
+        if not self.messages:
+            return True
+        if self._current_bot_record is not None and self._current_activity is not None:
+            self._current_bot_record["activity"] = self._current_activity.to_record()
+        self.session.model = self.model_combo.get()
+        self.session.temperature = float(self.temp_slider.get())
+        self.session.max_tokens = int(self.tokens_slider.get())
+        self.session.system_prompt = self.sys_entry.get().strip()
+        try:
+            self.service.save_chat_transcript(self.session, self.messages)
+            self._refresh_history()
+        except Exception:
+            self.history_status.configure(text="Kaydedilemedi", text_color=("#b91c1c", "#f87171"))
+            return False
+        self.history_status.configure(text="Kaydedildi", text_color=("gray40", "#94a3b8"))
+        return True
+
+    def _delete_chat(self) -> None:
+        if not self.messages:
+            return
+        if not messagebox.askyesno("Sohbeti sil", "Bu sohbet ve işlem ayrıntıları kalıcı olarak silinsin mi?"):
+            return
+        if self.is_streaming:
+            self._on_send_pressed()
+        try:
+            self.service.delete_chat_history(self.session.session_id)
+        except Exception:
+            self.history_status.configure(text="Silinemedi", text_color=("#b91c1c", "#f87171"))
+            return
+        self.session = self.service.get_or_create_session(None)
+        self.clear_chat()
+        self._update_mcp_chips()
+        self._refresh_history()
 
     def _select_image(self) -> None:
         """Multimodal sohbet için görsel dosyası seçer."""
@@ -583,7 +727,7 @@ class ChatView(ctk.CTkFrame):
             self.attached_image_path = dosya
             boyut_kb = os.path.getsize(dosya) / 1024
             self.img_tray_lbl.configure(text=f"📷 Eklenen Görsel: {Path(dosya).name} ({boyut_kb:.1f} KB)")
-            self.img_tray.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 4))
+            self.img_tray.grid(row=5, column=0, sticky="ew", padx=16, pady=(0, 4))
 
     def _remove_attached_image(self) -> None:
         self.attached_image_path = None
@@ -597,11 +741,46 @@ class ChatView(ctk.CTkFrame):
         self._on_send_pressed()
         return "break"
 
+    def _add_message(self, role: str, content: str, image_path: Optional[str] = None,
+                     timestamp: Optional[str] = None, image_data_url: Optional[str] = None) -> ChatMessageBubble:
+        """Her mesaj için tam genişlikte satır, yönüne göre sınırlı genişlikte balon."""
+        row = ctk.CTkFrame(self.chat_scroll, fg_color="transparent", height=1)
+        row.pack(fill="x", padx=12, pady=6)
+        bubble = ChatMessageBubble(row, role=role, content=content, image_path=image_path,
+                                    timestamp=timestamp, image_data_url=image_data_url)
+        is_user = role == "user"
+        bubble.pack(fill="x", anchor="e" if is_user else "w")
+        last_padding = None
+
+        def resize(event: Any) -> None:
+            nonlocal last_padding
+            available = int(event.width / row._get_widget_scaling())
+            width = min(560 if is_user else 800, int(available * (0.76 if is_user else 0.88)))
+            gutter = max(0, available - width)
+            padding = (gutter, 0) if is_user else (0, gutter)
+            if padding != last_padding:
+                last_padding = padding
+                bubble.pack_configure(padx=padding)
+
+        row.bind("<Configure>", resize, add="+")
+        return bubble
+
     def _on_send_pressed(self) -> None:
         if self.is_streaming:
             # Durdur
             self.service.cancel_active_stream()
+            if self.current_bot_bubble:
+                content = self.current_bot_bubble.raw_content
+                if content == "Yanıt hazırlanıyor...":
+                    content = "Yanıt durduruldu."
+                else:
+                    content = f"{content}\n\nYanıt durduruldu."
+                self.current_bot_bubble.update_text(content)
+                self._current_bot_record.update(content=content, pending=False)
+            if self._current_activity:
+                self._current_activity.finish(cancelled=True)
             self._finish_streaming()
+            self._save_history()
             return
 
         text = self.input_textbox.get("1.0", "end-1c").strip()
@@ -613,19 +792,7 @@ class ChatView(ctk.CTkFrame):
             messagebox.showwarning("Model Gerekli", "Lütfen bir model seçiniz.")
             return
 
-        # Kullanıcı balonunu ekle
-        user_bubble = ChatMessageBubble(
-            self.chat_scroll,
-            role="user",
-            content=text,
-            image_path=self.attached_image_path,
-        )
-        user_bubble.pack(fill="x", padx=12, pady=6)
-
-        # Mesaj listesine ekle
         image_to_send = self.attached_image_path
-        self._remove_attached_image()
-        self.input_textbox.delete("1.0", "end")
 
         # Multimodal içerik hazırlığı
         if image_to_send:
@@ -642,99 +809,110 @@ class ChatView(ctk.CTkFrame):
         else:
             user_content = text
 
-        self.messages.append({"role": "user", "content": user_content})
+        if self._welcome_card is not None:
+            self._welcome_card.destroy()
+            self._welcome_card = None
+        user_bubble = self._add_message("user", text, image_to_send)
+        self._remove_attached_image()
+        self.input_textbox.delete("1.0", "end")
+        self.messages.append({"role": "user", "content": user_content,
+                              "timestamp": user_bubble.timestamp, "image_path": image_to_send})
 
         # Asistan balonunu hazırla
-        self.current_bot_bubble = ChatMessageBubble(
-            self.chat_scroll,
-            role="assistant",
-            content="Yanıt hazırlanıyor...",
-        )
-        self.current_bot_bubble.pack(fill="x", padx=12, pady=6)
-
-        self._scroll_to_bottom()
+        bot_bubble = self._add_message("assistant", "Yanıt hazırlanıyor...")
+        self.current_bot_bubble = bot_bubble
+        bot_record = {"role": "assistant", "content": "", "timestamp": bot_bubble.timestamp, "pending": True}
+        self.messages.append(bot_record)
+        self._current_bot_record = bot_record
+        activity: Optional[ToolActivityGroup] = None
+        self._current_activity = None
+        stream_token = object()
+        self._stream_token = stream_token
+        self._scroll_to_bottom(force=True)
 
         # Akışı Başlat
         self.is_streaming = True
         self.send_btn.configure(text="Durdur", fg_color="#ef4444", hover_color="#dc2626")
+        self.history_combo.configure(state="disabled")
 
         # Oturum parametrelerini güncelle
         self.session.model = model
         self.session.temperature = float(self.temp_slider.get())
         self.session.max_tokens = int(self.tokens_slider.get())
         self.session.system_prompt = self.sys_entry.get().strip()
+        self._save_history()
 
         accumulated_chunks: List[str] = []
-        active_tools_map: Dict[str, ToolActivityBubble] = {}
+        text_before_tools = False
+
+        def get_activity() -> ToolActivityGroup:
+            nonlocal activity
+            if activity is None:
+                activity = ToolActivityGroup(bot_bubble)
+                activity.pack(fill="x", padx=12, pady=(0, 6), before=bot_bubble.text_label)
+                self._current_activity = activity
+            return activity
+
+        def complete(full_text: str = "", error: Optional[str] = None) -> None:
+            if self._stream_token is not stream_token:
+                return
+            full_text = full_text.strip()
+            text_content = "".join(accumulated_chunks).strip()
+            if error:
+                text_content = f"{text_content}\n\n⚠ Hata: {error}".strip()
+            elif full_text and not text_content.endswith(full_text):
+                text_content = f"{text_content}\n\n{full_text}".strip()
+            bot_bubble.update_text(text_content or "Yanıt metni oluşturulmadı. İşlem ayrıntılarını inceleyebilirsiniz.")
+            bot_record.update(content=bot_bubble.raw_content, pending=False)
+            if activity:
+                activity.finish(failed=error is not None)
+            self._finish_streaming()
+            self._save_history()
 
         def on_event(evt: AgentEvent):
+            nonlocal text_before_tools
+            if self._stream_token is not stream_token:
+                return
             if evt.type == AgentEventType.TEXT_DELTA:
                 if evt.content:
+                    if text_before_tools and accumulated_chunks:
+                        accumulated_chunks.append("\n\n")
+                    text_before_tools = False
                     accumulated_chunks.append(evt.content)
-                    if self.current_bot_bubble:
-                        self.current_bot_bubble.update_text("".join(accumulated_chunks))
-                        self._scroll_to_bottom()
+                    bot_bubble.update_text("".join(accumulated_chunks))
+                    bot_record["content"] = bot_bubble.raw_content
+                    self._scroll_to_bottom()
 
             elif evt.type == AgentEventType.REASONING_DELTA:
-                if self.current_bot_bubble and not accumulated_chunks:
-                    self.current_bot_bubble.update_text(f"💭 {evt.content}")
+                if evt.content:
+                    get_activity().append_reasoning(evt.content)
                     self._scroll_to_bottom()
 
             elif evt.type == AgentEventType.TOOL_CALL_STARTED:
-                bubble = ToolActivityBubble(
-                    self.chat_scroll,
-                    tool_name=evt.tool_name or "tool",
-                    server_name=evt.server_name,
-                    arguments=evt.arguments,
-                )
-                bubble.pack(fill="x", padx=12, pady=4)
-                active_tools_map[evt.tool_name or ""] = bubble
+                get_activity().start_tool(evt)
+                text_before_tools = bool(accumulated_chunks)
                 self._scroll_to_bottom()
 
-            elif evt.type == AgentEventType.TOOL_CALL_RESULT:
-                bubble = active_tools_map.get(evt.tool_name or "")
-                if bubble:
-                    bubble.set_result(evt.content or "", duration_ms=evt.duration_ms)
-                self._scroll_to_bottom()
-
-            elif evt.type == AgentEventType.TOOL_CALL_ERROR:
-                bubble = active_tools_map.get(evt.tool_name or "")
-                if bubble:
-                    bubble.set_error(evt.content or "", duration_ms=evt.duration_ms)
+            elif evt.type in (AgentEventType.TOOL_CALL_RESULT, AgentEventType.TOOL_CALL_ERROR, AgentEventType.TOOL_CALL_ARGUMENTS):
+                get_activity().update_tool(evt)
                 self._scroll_to_bottom()
 
             elif evt.type == AgentEventType.MCP_ERROR:
-                err_box = ctk.CTkFrame(self.chat_scroll, fg_color=("#fee2e2", "#450a0a"), corner_radius=6)
-                err_box.pack(fill="x", padx=12, pady=4)
-                ctk.CTkLabel(
-                    err_box,
-                    text=f"⚠️ MCP Bağlantı Hatası [{evt.server_name}]: {evt.content}",
-                    font=ctk.CTkFont(size=11),
-                    text_color="#ef4444",
-                ).pack(padx=8, pady=4)
+                get_activity().add_connection_error(evt)
                 self._scroll_to_bottom()
 
             elif evt.type == AgentEventType.DONE:
-                if self.current_bot_bubble:
-                    self.current_bot_bubble.update_text(evt.content or "".join(accumulated_chunks) or "(Yanıt tamamlandı)")
-                self.messages.append({"role": "assistant", "content": evt.content or "".join(accumulated_chunks)})
-                self._finish_streaming()
+                complete(evt.content or "")
 
             elif evt.type == AgentEventType.ERROR:
-                if self.current_bot_bubble:
-                    self.current_bot_bubble.update_text(f"⚠️ Hata: {evt.content}")
-                self._finish_streaming()
+                complete(error=evt.content or "Bilinmeyen hata")
+            self._schedule_save()
 
         def on_done(full_text: str):
-            if self.current_bot_bubble:
-                self.current_bot_bubble.update_text(full_text or "".join(accumulated_chunks) or "(Yanıt tamamlandı)")
-            self.messages.append({"role": "assistant", "content": full_text or "".join(accumulated_chunks)})
-            self._finish_streaming()
+            complete(full_text)
 
         def on_error(err_msg: str):
-            if self.current_bot_bubble:
-                self.current_bot_bubble.update_text(f"⚠️ Hata: {err_msg}")
-            self._finish_streaming()
+            complete(error=err_msg)
 
         self.service.chat_agent_stream_async(
             session_id=self.session.session_id,
@@ -745,28 +923,68 @@ class ChatView(ctk.CTkFrame):
             on_error=lambda e: self.after(0, lambda: on_error(e)),
         )
 
+    def destroy(self) -> None:
+        self._save_history()
+        self._stream_token = None
+        if self._scroll_job is not None:
+            self.after_cancel(self._scroll_job)
+            self._scroll_job = None
+        super().destroy()
+
     def _finish_streaming(self) -> None:
         self.is_streaming = False
+        self._stream_token = None
         self.send_btn.configure(text="Gönder", fg_color="#3b82f6", hover_color="#2563eb")
+        self.history_combo.configure(state="readonly")
         self._scroll_to_bottom()
 
-    def _scroll_to_bottom(self) -> None:
-        self.after(50, lambda: self.chat_scroll._parent_canvas.yview_moveto(1.0))
+    def _scroll_to_bottom(self, force: bool = False) -> None:
+        canvas = self.chat_scroll._parent_canvas
+        self._scroll_force = self._scroll_force or force
+        if self._scroll_job is not None:
+            return
+        # Geçmişi okuyan kullanıcıyı yeni olay geldiğinde aşağı çekme.
+        if not force and canvas.yview()[1] < 0.97:
+            return
+        previous_top = canvas.canvasy(0)
+
+        def scroll() -> None:
+            self._scroll_job = None
+            if self._scroll_force or canvas.canvasy(0) >= previous_top - 2:
+                canvas.yview_moveto(1.0)
+            self._scroll_force = False
+
+        self._scroll_job = self.after(50, scroll)
 
     def new_chat(self) -> None:
         """Yeni bir sohbet oturumu başlatır."""
-        if self.messages:
-            cevap = messagebox.askyesno("Yeni Sohbet", "Mevcut sohbet temizlenip yeni sohbet başlatılsın mı?")
-            if not cevap:
-                return
+        if self.is_streaming:
+            self._on_send_pressed()
+        if not self._save_history():
+            return
         self.session = self.service.get_or_create_session(None)
         self.clear_chat()
         self._update_mcp_chips()
+        self._refresh_history()
 
-    def clear_chat(self) -> None:
+    def clear_chat(self, *, reset_session: bool = True) -> None:
         """Tüm sohbet geçmişini temizler."""
+        if self.is_streaming:
+            self.service.cancel_active_stream()
+            self._finish_streaming()
+        if self._scroll_job is not None:
+            self.after_cancel(self._scroll_job)
+            self._scroll_job = None
+        self._scroll_force = False
+        self.current_bot_bubble = None
+        self._current_activity = None
+        self._current_bot_record = None
+        if self._save_job is not None:
+            self.after_cancel(self._save_job)
+            self._save_job = None
         self.messages.clear()
-        self.session.clear()
+        if reset_session:
+            self.session.clear()
         self._remove_attached_image()
         for widget in self.chat_scroll.winfo_children():
             widget.destroy()

@@ -1,12 +1,13 @@
-## v0.2.7 değişiklikleri
+## v0.2.8 değişiklikleri
 
-- Kodlama ajanında proje bazında kaydedilen model seçimi; devam eden sohbetlerde yeni modelle devam etme.
-- Eklenen, değişen ve silinen dosyalar için otomatik yenilenen, renkli önce/sonra fark görünümü.
-- Komutları, araç parametrelerini, çıktıları, süreleri ve hataları gösteren canlı işlem kaydı.
-- Alt klasörlerdeki kaynak dosyaların listesi ve satır numaralı dosya önizlemesi.
-- Projeyi ve seçili dosyayı VS Code, Cursor, Zed veya özel editörde açma; editör tercihini kaydetme.
-- Küçük pencerelerde fark görünümünü kullanılabilir tutan kompakt yerleşim.
-- Windows CI testlerinde geçici klasör temizliği ve satır sonu uyumluluğu düzeltildi.
+- Kullanıcı mesajları sağda, model yanıtları solda; pencere genişliğine uyumlu, daha okunabilir sohbet balonları.
+- Komutlar, araç çağrıları ve model düşüncesi yanıt başına kapalı bir işlem ayrıntıları bölümünde toplandı.
+- Tam komut çıktıları kaydırılarak incelenebilir ve kopyalanabilir.
+- Sohbet geçmişi yerel veritabanına otomatik kaydedilir; eski konuşmalar açılıp sürdürülebilir.
+- Mesajlar, ekli görseller, model ayarları ve işlem ayrıntıları uygulama yeniden açıldığında geri yüklenir.
+- Yeni sohbet önceki konuşmayı korur; seçili sohbet kullanıcı onayıyla silinebilir.
+- Yarım kalan yanıtların kurtarılması, tekrarlanan araç çağrıları ve geç gelen akış olayları için düzeltmeler.
+- Sohbet alanı, parametre paneli ve ek çubuklarının yerleşim çakışmaları giderildi; geçmişi okurken ekranın zorla aşağı kaydırılması engellendi.
 
 ## Masaüstü kurulumu
 

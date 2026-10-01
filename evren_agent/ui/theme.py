@@ -4,7 +4,7 @@ from __future__ import annotations
 # Uygulama adı
 APP_NAME = "evren"
 APP_SUBTITLE = "Yapay Zekâ ve Dil Modelleri Masaüstü İstemcisi"
-APP_VERSION = "0.2.4"
+APP_VERSION = "0.2.8"
 
 
 # Renk Paleti (Koyu / Açık Mod Destekli)

@@ -25,6 +25,7 @@ from evren_agent.config import (
     save_config,
 )
 from evren_agent.core.agent import Agent
+from evren_agent.core.chat_history import ChatHistoryStore
 from evren_agent.core.events import AgentEvent, AgentEventType
 from evren_agent.core.runtime import AsyncRuntime
 from evren_agent.core.session import ChatSession, SessionToolFilter
@@ -116,6 +117,8 @@ class EvrenService:
         if self.config_path:
             db_path = self.config_path.parent / "projects.db"
         self.projects = ProjectService(db_path=db_path)
+        history_path = (self.config_path.parent if self.config_path else Path.home() / ".evren") / "chats.db"
+        self.chat_history = ChatHistoryStore(history_path)
 
         # Core runtime, MCP pool & session managers
         self.runtime = AsyncRuntime.get_instance()
@@ -517,6 +520,13 @@ class EvrenService:
         """Retrieve existing chat session or create a new one with configured defaults."""
         if session_id and session_id in self.sessions:
             return self.sessions[session_id]
+        if session_id:
+            record = self.chat_history.load(session_id)
+            if record:
+                session = self.chat_history.restore_session(record)
+                session.active_mcp_servers.intersection_update(self.mcp_manager.connections)
+                self.sessions[session_id] = session
+                return session
 
         default_mcps: Set[str] = set()
         for name, conn in self.mcp_manager.connections.items():
@@ -531,6 +541,29 @@ class EvrenService:
         self.sessions[new_session.session_id] = new_session
         return new_session
 
+    def save_chat_transcript(self, session: ChatSession, messages: List[Dict[str, Any]]) -> None:
+        self.chat_history.save_transcript(session, messages)
+
+    def list_chat_history(self) -> List[Dict[str, Any]]:
+        return self.chat_history.list_conversations()
+
+    def load_chat_transcript(self, session_id: str) -> List[Dict[str, Any]]:
+        record = self.chat_history.load(session_id)
+        return record["transcript"] if record else []
+
+    def restore_chat_session(self, session_id: str) -> ChatSession:
+        record = self.chat_history.load(session_id)
+        if record is None:
+            raise KeyError(session_id)
+        session = self.chat_history.restore_session(record)
+        session.active_mcp_servers.intersection_update(self.mcp_manager.connections)
+        self.sessions[session_id] = session
+        return session
+
+    def delete_chat_history(self, session_id: str) -> None:
+        self.chat_history.delete(session_id)
+        self.sessions.pop(session_id, None)
+
     def set_session_mcp(self, session_id: str, server_name: str, enabled: bool) -> None:
         """Enable or disable an MCP server strictly for the specified chat session."""
         session = self.get_or_create_session(session_id)
@@ -540,6 +573,8 @@ class EvrenService:
         else:
             session.disable_mcp(server_name)
             self.runtime.submit(self.mcp_manager.release_for_session(session_id, server_name))
+        self.chat_history.save_context(session)
+        self.chat_history.save_settings(session)
         self._notify_mcp_listeners()
 
     def get_session_mcps(self, session_id: str) -> List[str]:
@@ -707,6 +742,7 @@ class EvrenService:
             # 3. Clean up from all active chat sessions
             for s in self.sessions.values():
                 s.disable_mcp(name)
+                self.chat_history.save_settings(s)
             return ok
 
         def _done(_):
@@ -846,16 +882,21 @@ class EvrenService:
                 augmented_prompt = f"[User attached image at: {image_path}]\n{prompt}"
 
             final_text = ""
-            async for evt in agent.run_stream(
-                prompt=augmented_prompt,
-                session=session,
-                session_tool_filter=self.session_tool_filter,
-                cancel_event=cancel_event,
-            ):
-                if on_event:
-                    self._dispatch(on_event, evt)
-                if evt.type == AgentEventType.DONE:
-                    final_text = evt.content or ""
+            try:
+                async for evt in agent.run_stream(
+                    prompt=augmented_prompt,
+                    session=session,
+                    session_tool_filter=self.session_tool_filter,
+                    cancel_event=cancel_event,
+                ):
+                    if evt.type not in (AgentEventType.TEXT_DELTA, AgentEventType.REASONING_DELTA):
+                        self.chat_history.save_context(session)
+                    if on_event:
+                        self._dispatch(on_event, evt)
+                    if evt.type == AgentEventType.DONE:
+                        final_text = evt.content or ""
+            finally:
+                self.chat_history.save_context(session)
 
             if on_done:
                 self._dispatch(on_done, final_text)

@@ -146,13 +146,15 @@ Grafik ortamda çift tıklayarak çalıştırmak için:
 - **Linux:** `evren.desktop` (Sistem menüsüne eklemek için `~/.local/share/applications/` içine kopyalanabilir)
 
 ### Temel Özellikler:
-- 💬 **Sohbet:** Gerçek zamanlı akışlı (streaming) yanıt üretimi, görsel yükleme (multimodal analiz), sistem talimatı, sıcaklık ve token sınırı ayarları, canlı veri araçları, sohbet geçmişini temizleme ve dışa aktarma (Markdown/JSON).
+- 💬 **Sohbet:** Gerçek zamanlı akışlı yanıtlar, görsel yükleme, model parametreleri, sağda kullanıcı / solda asistan mesajları, katlanabilir işlem ayrıntıları, otomatik kaydedilen sohbet geçmişi ve dışa aktarma (Markdown/JSON).
 - 👁️ **Görsel & OCR:** Belgeleri, faturaları ve fotoğrafları önizleme, EVREN OCR modelleriyle metin çıkarma, panoya kopyalama ve `.txt` olarak kaydetme.
 - 🎙️ **Ses Çözümleme:** MP3, WAV, M4A, OGG ve FLAC ses kayıtlarını metne ve zaman damgalı SRT altyazılara dönüştürme.
 - 🔍 **Yeniden Sıralama (Rerank):** Arama sorguları ve belge listelerini semantik alaka puanlarına göre sıralama.
 - 📊 **Kota ve Durum:** Canlı bakiye ve token kotası sorgulama, sunucu sağlık/hazırlık (`/healthz`, `/readyz`) kontrolleri ve resmi Kullanım Şartları (Terms) metnini okuyup onaylama.
 - 🔌 **Gelişmiş MCP Yöneticisi:** Yerel (`stdio`) ve uzak (`sse`/`streamable_http`) Model Context Protocol sunucularını görsel olarak ekleme, test etme, araç şemalarını inceleme, canlı logları izleme, işletim sistemi kasasında (`keyring`) güvenli token saklama ve her sohbet oturumuna özel bağımsız araç seçimi (per-chat MCP isolation).
 - ⚙️ **Ayarlar:** API taban adresi yapılandırması, API anahtarını işletim sisteminin şifreli kasasında (macOS Keychain, Windows Credential Manager, Linux Secret Service) saklama, açık/koyu tema ve arayüz ölçeklendirme.
+
+Sohbet ekranındaki **Sohbet geçmişi** listesinden eski bir konuşmayı seçip okumaya veya devam etmeye başlayabilirsiniz. **+ Yeni Sohbet** önceki konuşmayı korur; **Sohbeti sil** yalnızca seçili konuşmayı onay sonrası siler. Mesajlar, ekli görseller, işlem ayrıntıları ve model ayarları otomatik kaydedilir; uygulama açıldığında en son kaydedilmiş sohbet yüklenir. Yarım kalan yanıtlar korunur ve eski araç çağrıları yeniden çalıştırılmaz. Kayıtlar yerel `chats.db` dosyasında tutulur: kaynak koddan çalıştırıldığında `~/.evren/`, paketlenmiş uygulamada kullanıcıya ait `evren/config.yaml` dosyasının bulunduğu dizin.
 
 ### Projeler: Kodlama Ajanı
 
