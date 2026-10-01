@@ -254,6 +254,7 @@ class ChatView(ctk.CTkFrame):
         self._current_activity: Optional[ToolActivityGroup] = None
         self._scroll_job: Optional[str] = None
         self._scroll_force = False
+        self._last_follow_top: Optional[float] = None
         self._current_bot_record: Optional[Dict[str, Any]] = None
         self._history_ids: Dict[str, str] = {}
         self.is_streaming = False
@@ -987,7 +988,11 @@ class ChatView(ctk.CTkFrame):
 
     def _capture_scroll_anchor(self) -> Optional[float]:
         canvas = self.chat_scroll._parent_canvas
-        return canvas.canvasy(0) if canvas.yview()[1] >= 0.97 else None
+        # A reply can arrive before the new prompt's forced scroll timer runs.
+        # Carry that explicit request into Markdown's later native layout.
+        top = canvas.canvasy(0)
+        stayed_at_follow_position = self._last_follow_top is not None and abs(top - self._last_follow_top) <= 2
+        return top if self._scroll_force or canvas.yview()[1] >= 0.97 or stayed_at_follow_position else None
 
     def _scroll_to_bottom(self, force: bool = False, *, layout_top: Optional[float] = None) -> None:
         canvas = self.chat_scroll._parent_canvas
@@ -1010,6 +1015,7 @@ class ChatView(ctk.CTkFrame):
             canvas.configure(scrollregion=canvas.bbox("all"))
             if self._scroll_force or canvas.canvasy(0) >= previous_top - 2:
                 canvas.yview_moveto(1.0)
+                self._last_follow_top = canvas.canvasy(0)
             self._scroll_force = False
 
         self._scroll_job = self.after(50, scroll)
@@ -1037,6 +1043,7 @@ class ChatView(ctk.CTkFrame):
             self.after_cancel(self._scroll_job)
             self._scroll_job = None
         self._scroll_force = False
+        self._last_follow_top = None
         self.current_bot_bubble = None
         self._current_activity = None
         self._current_bot_record = None

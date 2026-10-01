@@ -7,7 +7,7 @@ from evren_agent.providers.evren import EvrenProvider
 from evren_agent.skills.skill import Skill
 from evren_agent.api import EvrenAPI, EvrenAPIError
 
-__version__ = "0.2.12"
+__version__ = "0.2.13"
 
 __all__ = [
     "Agent",

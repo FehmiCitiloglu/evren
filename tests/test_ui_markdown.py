@@ -162,6 +162,37 @@ def test_delayed_native_layout_keeps_last_markdown_line_visible(chat, monkeypatc
     assert last.winfo_rooty() + last.winfo_height() <= canvas.winfo_rooty() + canvas.winfo_height()
 
 
+def test_immediate_reply_preserves_pending_prompt_scroll(chat):
+    root, view, service = chat
+    stream = send(view, service)
+    canvas = view.chat_scroll._parent_canvas
+    canvas.configure(scrollregion=(0, 0, 600, 1200))
+    canvas.yview_moveto(0)
+    assert view._scroll_force
+    source = "```text\n" + "Tam yanıt\n" * 25 + "```\n\nSon satır"
+    emit(root, stream, AgentEventType.DONE, content=source)
+    renderer = view.current_bot_bubble.text_label
+    assert renderer._scroll_anchor is not None
+    pump(root, 0.25)
+    wait_for_layout(root, lambda: canvas.yview()[1] > 0.99)
+    last = renderer.blocks[-1]
+    assert last.winfo_rooty() + last.winfo_height() <= canvas.winfo_rooty() + canvas.winfo_height()
+
+
+def test_stream_keeps_following_after_viewport_shrinks(chat):
+    root, view, service = chat
+    stream = send(view, service)
+    emit(root, stream, AgentEventType.TEXT_DELTA, content="Satır  \n" * 60)
+    pump(root, 0.16)
+    canvas = view.chat_scroll._parent_canvas
+    wait_for_layout(root, lambda: canvas.yview()[1] > 0.99)
+    root.geometry("660x660")
+    pump(root, 0.16)
+    emit(root, stream, AgentEventType.TEXT_DELTA, content="Yeni satır  \n" * 20)
+    pump(root, 0.16)
+    wait_for_layout(root, lambda: canvas.yview()[1] > 0.99)
+
+
 def test_links_require_click_and_html_images_remain_text(chat, monkeypatch):
     root, view, service = chat
     opened = []
