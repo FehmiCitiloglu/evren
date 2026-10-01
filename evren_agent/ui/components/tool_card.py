@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import customtkinter as ctk
 
@@ -121,9 +121,11 @@ class ToolActivityBubble(ctk.CTkFrame):
 class ToolActivityGroup(ctk.CTkFrame):
     """One closed disclosure per assistant turn, including all repeated calls."""
 
-    def __init__(self, master: Any, **kwargs: Any) -> None:
+    def __init__(self, master: Any, on_collapse: Optional[Callable[[], None]] = None,
+                 **kwargs: Any) -> None:
         super().__init__(master, fg_color="transparent", **kwargs)
         self.tools: List[ToolActivityBubble] = []
+        self.on_collapse = on_collapse
         self.is_expanded = False
         self.running = True
         self.cancelled = False
@@ -151,6 +153,8 @@ class ToolActivityGroup(ctk.CTkFrame):
             self.details_frame.grid(row=1, column=0, sticky="ew", pady=(4, 0))
         self.is_expanded = not self.is_expanded
         self._refresh_summary()
+        if not self.is_expanded and self.on_collapse:
+            self.after_idle(self.on_collapse)
 
     def _toggle_reasoning(self) -> None:
         if self._reasoning_expanded:

@@ -185,14 +185,47 @@ def test_activity_is_folded_and_complete_output_is_inspectable(chat):
     assert tool.output_text.winfo_height() <= 180
     tool._copy_output()
     assert root.clipboard_get() == f"2: {output}"
+    view.chat_scroll._parent_canvas.yview_moveto(1.0)
+    pump(root)
     group.toggle_btn.invoke()
     pump(root)
     assert not tool.winfo_ismapped()
     wait_for_mapping(root, view.current_bot_bubble.text_label)
+    canvas = view.chat_scroll._parent_canvas
+    label = view.current_bot_bubble.text_label
+    assert canvas.winfo_rooty() <= label.winfo_rooty()
+    assert label.winfo_rooty() + label.winfo_height() <= canvas.winfo_rooty() + canvas.winfo_height()
     group.toggle_btn.invoke()
     pump(root)
     assert tool.is_expanded
     assert "SON SATIR" in tool.output_text.get("1.0", "end")
+
+
+def test_closing_older_activity_reveals_its_reply_instead_of_latest_turn(chat):
+    root, view, service = chat
+    first = send(view, service)
+    emit(root, first, AgentEventType.TOOL_CALL_STARTED, tool_name="command")
+    emit(root, first, AgentEventType.TOOL_CALL_RESULT, tool_name="command", content="İlk sonuç")
+    emit(root, first, AgentEventType.DONE, content="İlk yanıt")
+    older_bubble = view.current_bot_bubble
+    second = send(view, service, "Devam")
+    emit(root, second, AgentEventType.TEXT_DELTA, content="Uzun yanıt\n" * 100)
+    emit(root, second, AgentEventType.DONE, content="Tamamlandı")
+    pump(root, 0.08)
+    group = next(child for child in older_bubble.winfo_children()
+                 if hasattr(child, "on_collapse"))
+    group.toggle_btn.invoke()
+    pump(root)
+    # Simulate reading details after a later, much longer reply has arrived.
+    canvas = view.chat_scroll._parent_canvas
+    canvas.yview_moveto(1.0)
+    group.toggle_btn.invoke()
+    pump(root)
+    wait_for_mapping(root, older_bubble.text_label)
+    label = older_bubble.text_label
+    assert canvas.winfo_rooty() <= label.winfo_rooty()
+    assert label.winfo_rooty() + label.winfo_height() <= canvas.winfo_rooty() + canvas.winfo_height()
+    assert canvas.yview()[1] < 0.8
 
 
 def test_errors_and_repeated_calls_keep_their_own_details(chat):

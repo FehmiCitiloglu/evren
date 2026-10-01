@@ -658,6 +658,7 @@ class ChatView(ctk.CTkFrame):
             bubble = self._add_message(record["role"], content, record.get("image_path"), record.get("timestamp"), image_data_url)
             if record.get("activity"):
                 activity = ToolActivityGroup.from_record(bubble, record["activity"])
+                activity.on_collapse = lambda bubble=bubble: self._reveal_reply(bubble)
                 activity.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 6))
                 record["activity"] = activity.to_record()
         self.model_combo.set(session.model)
@@ -849,7 +850,7 @@ class ChatView(ctk.CTkFrame):
         def get_activity() -> ToolActivityGroup:
             nonlocal activity
             if activity is None:
-                activity = ToolActivityGroup(bot_bubble)
+                activity = ToolActivityGroup(bot_bubble, on_collapse=lambda: self._reveal_reply(bot_bubble))
                 activity.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 6))
                 self._current_activity = activity
             return activity
@@ -939,6 +940,30 @@ class ChatView(ctk.CTkFrame):
         self.history_combo.configure(state="readonly")
         self._scroll_to_bottom()
 
+    def _reveal_reply(self, bubble: ChatMessageBubble) -> None:
+        """Keep the clicked turn's answer visible when its tall drawer closes."""
+        if not bubble.winfo_exists():
+            return
+        self.update_idletasks()
+        canvas = self.chat_scroll._parent_canvas
+        bounds = canvas.bbox("all")
+        if not bounds:
+            return
+        canvas.configure(scrollregion=bounds)
+        # A canvas can retain its former pixel offset after content shrinks.
+        # Scroll to this turn, including restored/older turns, rather than to
+        # the conversation's newest message.
+        top = bubble.winfo_rooty() - self.chat_scroll.winfo_rooty()
+        bottom = top + bubble.winfo_height()
+        viewport = canvas.winfo_height()
+        visible_top = canvas.canvasy(0)
+        target = visible_top
+        if top < visible_top:
+            target = top
+        elif bottom > visible_top + viewport:
+            target = max(top, bottom - viewport)
+        canvas.yview_moveto(max(0, target - bounds[1]) / max(1, bounds[3] - bounds[1]))
+
     def _scroll_to_bottom(self, force: bool = False) -> None:
         canvas = self.chat_scroll._parent_canvas
         self._scroll_force = self._scroll_force or force
@@ -951,6 +976,10 @@ class ChatView(ctk.CTkFrame):
 
         def scroll() -> None:
             self._scroll_job = None
+            # Flush pending text/grid geometry before measuring the canvas;
+            # otherwise a slow native window can scroll the old short reply.
+            self.update_idletasks()
+            canvas.configure(scrollregion=canvas.bbox("all"))
             if self._scroll_force or canvas.canvasy(0) >= previous_top - 2:
                 canvas.yview_moveto(1.0)
             self._scroll_force = False
