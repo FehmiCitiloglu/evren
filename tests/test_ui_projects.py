@@ -336,6 +336,10 @@ def test_coding_changes_activity_preview_and_editor(tmp_path, monkeypatch):
                 if name == "Değişiklikler":
                     assert pv.coding_diff_box.winfo_height() >= 80
                 for widget in (pv.coding_open_project_btn, pv.coding_send_btn, pv.coding_diff_box):
+                    # Inactive tabs retain their previous native geometry;
+                    # bounds only describe the currently displayed controls.
+                    if not widget.winfo_ismapped():
+                        continue
                     assert widget.winfo_rootx() + widget.winfo_width() <= app.winfo_rootx() + app.winfo_width()
                     assert widget.winfo_rooty() + widget.winfo_height() <= app.winfo_rooty() + app.winfo_height()
     finally:

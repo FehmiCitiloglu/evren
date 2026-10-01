@@ -146,10 +146,11 @@ class ChatMessageBubble(ctk.CTkFrame):
         self.role = role
         self.raw_content = content
         self.timestamp = timestamp or datetime.datetime.now().strftime("%H:%M")
+        self.grid_columnconfigure(0, weight=1)
 
         # Üst Bilgi Satırı (Gönderen ve Zaman Damgası)
         header_frame = ctk.CTkFrame(self, fg_color="transparent")
-        header_frame.pack(fill="x", padx=12, pady=(8, 4))
+        header_frame.grid(row=0, column=0, sticky="ew", padx=12, pady=(8, 4))
 
         sender_title = "Siz" if is_user else "evren"
         sender_color = "#dbeafe" if is_user else colors["accent_secondary"]
@@ -195,11 +196,11 @@ class ChatMessageBubble(ctk.CTkFrame):
                 pil_img.thumbnail((240, 180))
                 ctk_thumb = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=pil_img.size)
                 img_lbl = ctk.CTkLabel(self, image=ctk_thumb, text="")
-                img_lbl.pack(anchor="w", padx=12, pady=4)
+                img_lbl.grid(row=1, column=0, sticky="w", padx=12, pady=4)
             except Exception:
                 img_name = Path(image_path).name if image_path else "Görsel"
                 err_lbl = ctk.CTkLabel(self, text=f"📷 [Ekli Görsel: {img_name}]", font=ctk.CTkFont(size=11))
-                err_lbl.pack(anchor="w", padx=12, pady=4)
+                err_lbl.grid(row=1, column=0, sticky="w", padx=12, pady=4)
 
         # Mesaj Metni
         self.text_label = ctk.CTkLabel(
@@ -212,7 +213,7 @@ class ChatMessageBubble(ctk.CTkFrame):
             justify="left",
             anchor="w",
         )
-        self.text_label.pack(fill="x", padx=12, pady=(2, 10))
+        self.text_label.grid(row=3, column=0, sticky="ew", padx=12, pady=(2, 10))
         self._wraplength = 700
         self.bind("<Configure>", self._resize_text, add="+")
 
@@ -657,7 +658,7 @@ class ChatView(ctk.CTkFrame):
             bubble = self._add_message(record["role"], content, record.get("image_path"), record.get("timestamp"), image_data_url)
             if record.get("activity"):
                 activity = ToolActivityGroup.from_record(bubble, record["activity"])
-                activity.pack(fill="x", padx=12, pady=(0, 6), before=bubble.text_label)
+                activity.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 6))
                 record["activity"] = activity.to_record()
         self.model_combo.set(session.model)
         self.temp_slider.set(session.temperature)
@@ -849,7 +850,7 @@ class ChatView(ctk.CTkFrame):
             nonlocal activity
             if activity is None:
                 activity = ToolActivityGroup(bot_bubble)
-                activity.pack(fill="x", padx=12, pady=(0, 6), before=bot_bubble.text_label)
+                activity.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 6))
                 self._current_activity = activity
             return activity
 

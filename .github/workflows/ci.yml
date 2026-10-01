@@ -45,4 +45,4 @@ jobs:
 
       - name: Testler (macOS ve Windows)
         if: runner.os != 'Linux'
-        run: python -m pytest
+        run: python scripts/test_desktop.py

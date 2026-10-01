@@ -1,4 +1,4 @@
-## v0.2.8 değişiklikleri
+## v0.2.9 değişiklikleri
 
 - Kullanıcı mesajları sağda, model yanıtları solda; pencere genişliğine uyumlu, daha okunabilir sohbet balonları.
 - Komutlar, araç çağrıları ve model düşüncesi yanıt başına kapalı bir işlem ayrıntıları bölümünde toplandı.

@@ -130,12 +130,13 @@ class ToolActivityGroup(ctk.CTkFrame):
         self.failed = False
         self._reasoning_parts: List[str] = []
         self.reasoning_text: Optional[ctk.CTkTextbox] = None
+        self.grid_columnconfigure(0, weight=1)
         self.toggle_btn = ctk.CTkButton(self, text="İşlem ayrıntıları ▸", height=30, anchor="w",
                                        fg_color=("#e2e8f0", "#172336"),
                                        hover_color=("#cbd5e1", "#243247"),
                                        text_color=("#334155", "#cbd5e1"),
                                        font=ctk.CTkFont(size=12), command=self._toggle_expand)
-        self.toggle_btn.pack(fill="x")
+        self.toggle_btn.grid(row=0, column=0, sticky="ew")
         self.details_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.reasoning_btn = ctk.CTkButton(self.details_frame, text="Model düşüncesi ▸", anchor="w",
                                           height=26, fg_color="transparent",
@@ -145,9 +146,9 @@ class ToolActivityGroup(ctk.CTkFrame):
 
     def _toggle_expand(self) -> None:
         if self.is_expanded:
-            self.details_frame.pack_forget()
+            self.details_frame.grid_remove()
         else:
-            self.details_frame.pack(fill="x", pady=(4, 0))
+            self.details_frame.grid(row=1, column=0, sticky="ew", pady=(4, 0))
         self.is_expanded = not self.is_expanded
         self._refresh_summary()
 
