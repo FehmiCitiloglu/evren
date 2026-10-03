@@ -17,7 +17,7 @@ providers:
     type: "evren"
     base_url: "https://evren-llmapi.ssyz.org.tr/v1"
     api_key_env: "EVREN_API_KEY"
-    default_model: "glm-5.3"
+    default_model: "mimo-v2.6-pro"
     models:
       - id: "glm-5.3"
         name: "GLM 5.3"
