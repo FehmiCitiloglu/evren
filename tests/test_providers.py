@@ -1,5 +1,10 @@
 from __future__ import annotations
+import json
+import httpx
 import pytest
+from evren_agent.core.agent import Agent
+from evren_agent.core.events import AgentEventType
+from evren_agent.core.session import ChatSession
 from evren_agent.core.types import Message
 from evren_agent.providers.evren import EvrenProvider, DEFAULT_EVREN_DIRECT_URL, DEFAULT_LLMTR_GATEWAY_URL
 from evren_agent.providers.registry import ProviderRegistry
@@ -75,3 +80,42 @@ def test_provider_registry():
     registry.set_active("llmtr")
     assert registry.active_name == "llmtr"
     assert registry.get_active() == prov2
+
+
+@pytest.mark.asyncio
+async def test_nested_usage_frames_do_not_restart_model_or_repeat_tools(monkeypatch):
+    """MIMO usage tails must not trigger fallback after a complete tool call."""
+    usage = {"prompt_tokens": 304, "completion_tokens": 45, "total_tokens": 349,
+             "prompt_tokens_details": {"cached_tokens": 0, "created_cache_tokens": 304},
+             "completion_tokens_details": {"reasoning_tokens": 45}}
+    requests = []
+    executions = []
+    def respond(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        assert body["stream"]  # A fallback request would fail this assertion.
+        if body["messages"][-1]["role"] == "user":
+            frames = [{"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "usage-check",
+                        "function": {"name": "calculate", "arguments": '{"expression":"42 * 2"}'}}]},
+                        "finish_reason": "tool_calls"}]}]
+        else:
+            frames = [{"choices": [{"delta": {"content": "84"}, "finish_reason": "stop"}]}]
+        frames.append({"choices": [], "usage": usage})
+        text = "".join(f"data: {json.dumps(frame)}\n\n" for frame in frames) + "data: [DONE]\n\n"
+        return httpx.Response(200, text=text)
+    native_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: native_client(
+        transport=httpx.MockTransport(respond), **kwargs))
+    agent = Agent(config={"plugins": {"autoload_builtins": False}, "mcp_servers": {}})
+    agent.providers.register("usage-check", EvrenProvider(api_key="local-test", base_url="http://local-test/v1"), set_active=True)
+    await agent.initialize()
+    agent.tools._handlers["calculate"] = lambda expression: (executions.append(expression) or "84")
+    try:
+        events = [event async for event in agent.run_stream("Hesapla", session=ChatSession())]
+        assert len(requests) == 2
+        assert executions == ["42 * 2"]
+        assert events[-1].type == AgentEventType.DONE
+        assert events[-1].content == "84"
+        assert sum(event.type == AgentEventType.TOOL_CALL_STARTED for event in events) == 1
+    finally:
+        await agent.close()

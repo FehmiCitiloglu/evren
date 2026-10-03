@@ -364,6 +364,9 @@ async def test_agent_run_stream_with_mcp_and_events(mock_server_path: str):
         events.append(evt)
 
     event_types = [e.type for e in events]
+    assert event_types[0] == AgentEventType.MODEL_REQUEST_STARTED
+    requests = [e for e in events if e.type == AgentEventType.MODEL_REQUEST_STARTED]
+    assert [e.metadata["iteration"] for e in requests] == [1, 2]
     assert AgentEventType.TOOL_CALL_STARTED in event_types
     assert AgentEventType.TOOL_CALL_RESULT in event_types
     assert AgentEventType.TEXT_DELTA in event_types
@@ -374,6 +377,9 @@ async def test_agent_run_stream_with_mcp_and_events(mock_server_path: str):
     assert len(tool_results) == 1
     assert tool_results[0].content == "EVREN"
     assert tool_results[0].duration_ms is not None
+    started = next(e for e in events if e.type == AgentEventType.TOOL_CALL_STARTED)
+    assert started.metadata["tool_call_id"] == tool_results[0].metadata["tool_call_id"]
+    assert event_types.index(AgentEventType.TOOL_CALL_RESULT) < events.index(requests[1])
 
     await agent.close()
 
@@ -413,6 +419,8 @@ async def test_disabled_mcp_tool_execution_blocked(mock_server_path: str):
 
 def test_service_mcp_integration(temp_config_file: Path, mock_server_path: str, monkeypatch):
     monkeypatch.chdir(temp_config_file.parent)
+    # Keep service databases in the test sandbox, away from the user's data.
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: temp_config_file.parent))
     service = EvrenService()
 
     # Add server via service

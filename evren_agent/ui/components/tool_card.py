@@ -8,6 +8,7 @@ import customtkinter as ctk
 
 from evren_agent.core.events import AgentEvent, AgentEventType
 from evren_agent.mcp.models import redact_secrets
+from evren_agent.ui.components.live_activity import ActivityIndicator, command_preview
 
 
 def _set_text(widget: ctk.CTkTextbox, content: str) -> None:
@@ -45,16 +46,25 @@ class ToolActivityBubble(ctk.CTkFrame):
                                       font=ctk.CTkFont(size=12, weight="bold"),
                                       text_color=("#0369a1", "#38bdf8"))
         self.title_label.grid(row=0, column=0, sticky="ew")
-        self.status_badge = ctk.CTkLabel(header, text="Çalışıyor…", anchor="w",
+        self.command_label = ctk.CTkLabel(header, text=command_preview(tool_name, self.arguments),
+                                          width=1, anchor="w", justify="left", wraplength=400,
+                                          font=ctk.CTkFont(family="monospace", size=11),
+                                          text_color=("#334155", "#cbd5e1"))
+        self.command_label.grid(row=1, column=0, sticky="ew")
+        self.status_badge = ActivityIndicator(header,
                                         font=ctk.CTkFont(size=11), text_color=("#92400e", "#fbbf24"))
-        self.status_badge.grid(row=1, column=0, sticky="w")
+        self.status_badge.grid(row=2, column=0, sticky="ew")
+        self.status_badge.start("Çalışıyor")
         self.toggle_btn = ctk.CTkButton(header, text="Detay ▸", width=64, height=26,
                                        font=ctk.CTkFont(size=11), fg_color="transparent",
                                        hover_color=("gray80", "#1e293b"),
                                        text_color=("gray30", "#cbd5e1"), command=self._toggle_expand)
-        self.toggle_btn.grid(row=0, column=1, rowspan=2, padx=(6, 0))
-        header.bind("<Configure>", lambda event: self.title_label.configure(
-            wraplength=max(40, int(event.width / self._get_widget_scaling()) - 80)), add="+")
+        self.toggle_btn.grid(row=0, column=1, rowspan=3, padx=(6, 0))
+        def resize(event):
+            width = max(40, int(event.width / self._get_widget_scaling()) - 80)
+            for label in (self.title_label, self.command_label, self.status_badge):
+                label.configure(wraplength=width)
+        header.bind("<Configure>", resize, add="+")
 
     def _build_details(self) -> None:
         self.details_frame = ctk.CTkFrame(self, fg_color=("gray88", "#0b1320"), corner_radius=6)
@@ -94,12 +104,15 @@ class ToolActivityBubble(ctk.CTkFrame):
 
     def set_arguments(self, arguments: Dict[str, Any]) -> None:
         self.arguments.update(arguments)
+        self.command_label.configure(text=command_preview(self.tool_name, self.arguments))
+        self.status_badge.set_stage("Çalışıyor")
         self._refresh_details()
 
     def set_result(self, content: str, duration_ms: Optional[float] = None) -> None:
         self.output_content = content
         self.duration_ms = duration_ms
         self.status = "done"
+        self.status_badge.stop()
         duration = f" · {duration_ms:.0f} ms" if duration_ms is not None else ""
         self.status_badge.configure(text=f"✓ Tamamlandı{duration}", text_color=("#047857", "#34d399"))
         self._refresh_details()
@@ -108,12 +121,14 @@ class ToolActivityBubble(ctk.CTkFrame):
         self.error_content = error_msg
         self.duration_ms = duration_ms
         self.status = "error"
+        self.status_badge.stop()
         duration = f" · {duration_ms:.0f} ms" if duration_ms is not None else ""
         self.status_badge.configure(text=f"⚠ Hata{duration}", text_color=("#b91c1c", "#f87171"))
         self._refresh_details()
 
     def set_stopped(self) -> None:
         self.status = "stopped"
+        self.status_badge.stop()
         self.status_badge.configure(text="Durduruldu", text_color=("gray40", "#94a3b8"))
         self._refresh_details()
 
@@ -130,6 +145,7 @@ class ToolActivityGroup(ctk.CTkFrame):
         self.running = True
         self.cancelled = False
         self.failed = False
+        self.phase = "Model yanıtı bekleniyor"
         self._reasoning_parts: List[str] = []
         self.reasoning_text: Optional[ctk.CTkTextbox] = None
         self.grid_columnconfigure(0, weight=1)
@@ -253,7 +269,9 @@ class ToolActivityGroup(ctk.CTkFrame):
 
     def _refresh_summary(self) -> None:
         errors = sum(tool.status == "error" for tool in self.tools)
-        state = "Çalışıyor…" if self.running else "Durduruldu" if self.cancelled else "Hata" if self.failed else "Tamamlandı"
+        active = [tool for tool in self.tools if tool.status == "running"]
+        state = (f"{len(active)} komut çalışıyor" if active else self.phase) if self.running else (
+            "Durduruldu" if self.cancelled else "Hata" if self.failed else "Tamamlandı")
         count = f" · {len(self.tools)} işlem" if self.tools else ""
         warning = f" · {errors} hata" if errors else ""
         arrow = "▾" if self.is_expanded else "▸"

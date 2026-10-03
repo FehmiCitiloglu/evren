@@ -34,6 +34,9 @@ class ChatServiceStub:
         self.sessions[self.session.session_id] = self.session
         return self.session
 
+    def set_default_model(self, model):
+        self.default_model = model.strip()
+
     def restore_chat_session(self, session_id):
         session = self.chat_history.restore_session(self.chat_history.load(session_id))
         self.sessions[session_id] = session
@@ -321,6 +324,91 @@ def test_text_only_reply_has_no_activity_and_on_done_fallback_works(chat):
     assert len(view.messages) == 2
 
 
+def test_live_activity_shows_command_without_opening_details_and_keeps_animating(chat):
+    root, view, service = chat
+    stream = send(view, service)
+    banner = view.live_activity
+    wait_for_mapping(root, banner)
+    assert view.activity_stage == "Hazırlanıyor"
+    emit(root, stream, AgentEventType.MCP_CONNECTING, server_name="computer-use")
+    assert view.activity_stage == "MCP bağlanıyor"
+    assert "computer-use" in banner.detail.cget("text")
+    emit(root, stream, AgentEventType.MODEL_REQUEST_STARTED)
+    assert view.activity_stage == "Model yanıtı bekleniyor"
+    emit(root, stream, AgentEventType.REASONING_DELTA, content="Sonraki adımı değerlendiriyorum.")
+    assert view.activity_stage == "Model düşünüyor"
+    emit(root, stream, AgentEventType.TOOL_CALL_STARTED, tool_name="run_command",
+         arguments={"command": "API_KEY=secret-token python scene.py"})
+    group = view._current_activity
+    tool = group.tools[0]
+    assert not group.is_expanded
+    assert not tool.is_expanded
+    assert view.activity_stage == "Komut çalışıyor"
+    assert "python scene.py" in banner.detail.cget("text")
+    assert "secret-token" not in banner.detail.cget("text")
+    assert "python scene.py" in tool.command_label.cget("text")
+    assert "secret-token" not in tool.command_label.cget("text")
+    assert tool.status_badge.running
+    frame = banner.indicator._frame
+    pump(root, 0.25)  # No new events: the UI heartbeat must still move.
+    assert banner.indicator._frame != frame
+    banner.indicator.last_event_at -= 20
+    pump(root, 0.25)
+    assert "Son etkinlik" in banner.indicator.cget("text")
+    emit(root, stream, AgentEventType.TOOL_CALL_RESULT, tool_name="run_command", content="Tamam")
+    assert not tool.status_badge.running
+    assert tool.status_badge._job is None
+    assert view.activity_stage == "Model yanıtı bekleniyor"
+    assert "Komutlar tamamlandı" in banner.detail.cget("text")
+    assert "Model yanıtı bekleniyor" in group.toggle_btn.cget("text")
+    assert "Son etkinlik" not in banner.indicator.cget("text")
+    assert banner.indicator.running
+    emit(root, stream, AgentEventType.TEXT_DELTA, content="Sahne hazır.")
+    assert view.activity_stage == "Yanıt yazılıyor"
+    emit(root, stream, AgentEventType.DONE, content="Sahne hazır.")
+    assert not banner.winfo_ismapped()
+    assert not banner.indicator.running
+    assert banner.indicator._job is None
+
+
+def test_active_commands_are_matched_by_call_id_and_stop_cleans_up_indicators(chat):
+    root, view, service = chat
+    stream = send(view, service)
+    for call_id, command in (("a", "python first.py"), ("b", "python second.py")):
+        emit(root, stream, AgentEventType.TOOL_CALL_STARTED, tool_name="run_command",
+             arguments={"command": command}, metadata={"tool_call_id": call_id})
+    assert view.activity_stage == "2 komut çalışıyor"
+    emit(root, stream, AgentEventType.TOOL_CALL_ERROR, tool_name="run_command",
+         content="İkinci komut başarısız", metadata={"tool_call_id": "b"})
+    assert view.activity_stage == "Komut çalışıyor"
+    assert "python first.py" in view.live_activity.detail.cget("text")
+    tool = view._current_activity.tools[0]
+    assert tool.status_badge.running
+    view._on_send_pressed()
+    assert tool.status_badge._job is None
+    assert view.live_activity.indicator._job is None
+    emit(root, stream, AgentEventType.TOOL_CALL_STARTED, tool_name="late")
+    assert not view.live_activity.winfo_ismapped()
+
+
+def test_live_activity_fits_narrow_windows_and_survives_scroll(chat):
+    root, view, service = chat
+    stream = send(view, service)
+    emit(root, stream, AgentEventType.TEXT_DELTA, content="Önceki yanıt  \n" * 80)
+    emit(root, stream, AgentEventType.TOOL_CALL_STARTED, tool_name="run_command",
+         arguments={"command": "python very_long_script.py --path " + "/long/path" * 30})
+    for width in (660, 940, 1400):
+        root.geometry(f"{width}x760")
+        pump(root, 0.12)
+        view.chat_scroll._parent_canvas.yview_moveto(0)
+        banner = view.live_activity
+        assert banner.winfo_ismapped()
+        assert banner.winfo_rootx() + banner.winfo_width() <= root.winfo_rootx() + root.winfo_width()
+        assert banner.detail.winfo_width() < banner.winfo_width()
+        assert banner.winfo_rooty() + banner.winfo_height() <= view.input_textbox.winfo_rooty()
+        assert view.send_btn.winfo_rooty() + view.send_btn.winfo_height() <= root.winfo_rooty() + root.winfo_height()
+
+
 def test_stream_completion_does_not_repeat_text_with_trailing_whitespace(chat):
     root, view, service = chat
     stream = send(view, service)
@@ -464,6 +552,32 @@ def test_async_model_list_preserves_restored_model(chat, monkeypatch):
     callbacks[0](["other-model"])
     assert view.model_combo.get() == "saved-model"
     assert view.session.model == "saved-model"
+
+
+def test_typed_model_is_remembered_when_sending(chat):
+    root, view, service = chat
+    view.model_combo.set("mimo")
+    stream = send(view, service)
+    assert service.default_model == "mimo"
+    assert view.session.model == "mimo"
+    emit(root, stream, AgentEventType.DONE, content="Yanıt")
+    view.new_chat()
+    assert view.model_combo.get() == "mimo"
+    assert view.session.model == "mimo"
+
+
+def test_new_chat_uses_latest_default_after_restoring_older_model(chat):
+    root, view, service = chat
+    stream = send(view, service)
+    emit(root, stream, AgentEventType.DONE, content="Yanıt")
+    old_id = view.session.session_id
+    view.new_chat()
+    view._on_model_selected("mimo")
+    view._restore_chat(old_id)
+    assert view.model_combo.get() == "test-model"
+    view.new_chat()
+    assert view.model_combo.get() == "mimo"
+    assert view.session.model == "mimo"
 
 
 def test_saved_image_preview_survives_original_file_removal(chat, tmp_path):

@@ -1,3 +1,11 @@
+## v0.2.16 değişiklikleri
+
+- Model, ilk yanıtından önce işletim sistemi/sürümü, mimari, komut kabuğu, çalışma dizini, Python çalışma zamanı, yerel saat ve bulunan temel araçları öğrenir. Ortam bilgileri her model isteğinde yenilenir ve `get_environment_info` aracıyla sorgulanabilir.
+- Yerel komutlar için gerçek kabuğun sözdizimi esas alınır; macOS, Linux, CMD ve PowerShell arasındaki farklar sistem bağlamında belirtilir.
+- Sohbet sırasında modelin yanıt bekleme, düşünme, MCP bağlantısı ve komut çalıştırma aşamaları canlı olarak gösterilir. Komut önizlemesi ve geçen süre ayrıntılar kapalıyken de görünür.
+- Açıkça seçilen model yeni sohbetler ve uygulama yeniden başlatıldığında korunur.
+- İç içe token kullanım verileri içeren akış yanıtlarının araçları yeniden çalıştırmasına yol açan doğrulama hatası düzeltildi.
+
 ## v0.2.15 değişiklikleri
 
 - Apple Silicon ve Intel macOS kurulumları Developer ID sertifikasıyla imzalanır ve Apple noter onayından geçer.

@@ -88,7 +88,7 @@ class ChatWorkspace(ctk.CTkFrame):
         for sid, record in sorted(records.items(), key=lambda pair: pair[1]["updated_at"], reverse=True):
             if query and query not in record["title"].casefold():
                 continue
-            status = ("● Yanıt yazılıyor" if sid in self._busy else
+            status = (f"● {self.pages[sid].activity_stage}" if sid in self._busy else
                       "● Yeni yanıt" if sid in self._unread else
                       datetime.datetime.fromtimestamp(record["updated_at"]).strftime("%d.%m · %H:%M"))
             title = record["title"][:23] + ("…" if len(record["title"]) > 23 else "")

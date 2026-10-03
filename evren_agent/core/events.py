@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 
 class AgentEventType(str, Enum):
+    MODEL_REQUEST_STARTED = "model_request_started"
     TEXT_DELTA = "text_delta"
     REASONING_DELTA = "reasoning_delta"
     TOOL_CALL_STARTED = "tool_call_started"

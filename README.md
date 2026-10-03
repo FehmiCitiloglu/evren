@@ -125,6 +125,8 @@ python -m evren_agent.api.cli models
 
 Her komutta `--help` bulunur. API komutları agent, plugin veya MCP sunucusu başlatmaz; LLMTR'ye otomatik yönlendirme yapmaz.
 
+Agent sohbetlerinde (`evren-agent`, masaüstü sohbet ve Coding Agent) model, ilk yanıtından önce yerel çalışma ortamını sistem bağlamında alır: işletim sistemi/sürümü, mimari, komut aracının gerçekten kullandığı kabuk, çalışma dizini, Python çalışma zamanı, saat dilimi içeren yerel saat ve PATH üzerinde bulunan temel araçlar. Bu bilgiler her model isteğinde yenilenir; `get_environment_info` aracıyla da sorgulanabilir. Örneğin macOS/zsh ortamında komutların zsh sözdizimine göre yazılması yönlendirilir. Ortam değişkenlerinin tamamı veya API anahtarları bu bağlama eklenmez. Terminal penceresinin kabuğu ile komut aracının varsayılan kabuğu farklı olabilir; model komut aracının kabuğunu esas alır.
+
 ## Masaüstü Uygulaması (`evren`)
 
 EVREN LLM API'sini grafiksel kullanıcı arayüzü ile kullanmak için çapraz platform (macOS, Windows, Linux) ve tamamen Türkçe tasarlanmış modern masaüstü uygulamasıdır. Pencere başlığı ve uygulama adı yalnızca **`evren`** olarak tanımlanmıştır.

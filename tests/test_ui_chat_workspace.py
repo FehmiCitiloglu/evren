@@ -95,3 +95,20 @@ def test_workspace_toolbar_fits_small_window(workspace):
     page = view.current
     for widget in (page.model_combo, page.mcp_btn, page.toggle_params_btn, page.send_btn):
         assert widget.winfo_rootx() + widget.winfo_width() <= root.winfo_rootx() + root.winfo_width()
+
+
+def test_sidebar_reports_each_background_chats_actual_phase(workspace):
+    root, view, service = workspace
+    first = view.current
+    stream = send(first, service)
+    view.new_chat()
+    emit(root, stream, AgentEventType.TOOL_CALL_STARTED, tool_name="run_command",
+         arguments={"command": "python scene.py"})
+    assert any("Komut çalışıyor" in child.cget("text") for child in view.history_list.winfo_children())
+    emit(root, stream, AgentEventType.TOOL_CALL_RESULT, tool_name="run_command", content="OK")
+    assert any("Model yanıtı bekleniyor" in child.cget("text") for child in view.history_list.winfo_children())
+    assert first.live_activity.indicator.running
+    view.open_chat(first.session.session_id)
+    pump(root)
+    assert first.live_activity.winfo_ismapped()
+    assert "Komutlar tamamlandı" in first.live_activity.detail.cget("text")

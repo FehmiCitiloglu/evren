@@ -187,6 +187,20 @@ class EvrenService:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
         save_config(self.config, self.config_path)
 
+    def set_default_model(self, model: str) -> None:
+        """Remember an explicit model choice for future chats and app restarts."""
+        model = model.strip()
+        if not model:
+            raise ValueError("Lütfen bir model seçiniz.")
+        if model == self.default_model:
+            return
+        config = deepcopy(self.config)
+        config.setdefault("providers", {}).setdefault(self.provider, {})["default_model"] = model
+        save_config(config, self.config_path)
+        self._provider_cfg = self.config.setdefault("providers", {}).setdefault(self.provider, {})
+        self._provider_cfg["default_model"] = model
+        self.default_model = model
+
     def test_connection_async(
         self,
         on_success: Callable[[Dict[str, Any]], None],
@@ -917,6 +931,10 @@ class EvrenService:
             # Acquire/connect active MCPs for this session
             for s_name in list(session.active_mcp_servers):
                 try:
+                    if on_event:
+                        self._dispatch(on_event, AgentEvent(
+                            type=AgentEventType.MCP_CONNECTING,
+                            session_id=session.session_id, server_name=s_name))
                     acquired = await self.mcp_manager.acquire_for_session(session.session_id, s_name)
                     if not acquired:
                         continue

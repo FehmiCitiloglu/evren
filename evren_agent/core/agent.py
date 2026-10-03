@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple, Union
 
 from evren_agent.config import load_config
+from evren_agent.core.environment import environment_prompt, get_environment_info
 from evren_agent.core.shell import run_shell
 from evren_agent.core.tools import ToolRegistry
 from evren_agent.core.types import (
@@ -339,14 +340,14 @@ class Agent:
         self.tools.register(
             ToolDefinition(
                 name="run_command",
-                description="Execute a shell command in the local environment (supports PowerShell and CMD on Windows, or bash/zsh on Unix) and return stdout/stderr.",
+                description="Execute a local shell command and return stdout/stderr. Follow the OS, default shell syntax and working directory in the local execution environment context.",
                 parameters={
                     "type": "object",
                     "properties": {
                         "command": {"type": "string", "description": "The command string to execute"},
                         "shell": {
                             "type": "string",
-                            "description": "Optional shell interpreter, e.g. bash, zsh, powershell, pwsh, cmd. Defaults to the system shell.",
+                            "description": "Optional interpreter confirmed available on this machine. Omit to use default_shell from the environment context.",
                         },
                         "cwd": {"type": "string", "description": "Working directory for this command only"},
                         "timeout": {"type": "number", "exclusiveMinimum": 0, "description": "Timeout in seconds (default 60)"},
@@ -356,6 +357,16 @@ class Agent:
                 source="meta:agent",
             ),
             self.run_command_async,
+        )
+
+        self.tools.register(
+            ToolDefinition(
+                name="get_environment_info",
+                description="Refresh local OS, architecture, default command shell, working directory, Python runtime, local time and common executables available on PATH.",
+                parameters={"type": "object", "properties": {}},
+                source="meta:agent",
+            ),
+            self.get_environment_info,
         )
 
         # Tool 11: file operations
@@ -476,6 +487,9 @@ class Agent:
         target_cwd = cwd or getattr(self, "default_cwd", None)
         return await run_shell(command, shell=shell, cwd=target_cwd, timeout=timeout)
 
+    def get_environment_info(self) -> Dict[str, Any]:
+        return get_environment_info(cwd=self.default_cwd)
+
     async def run_local_command(self, command: str) -> str:
         """Execute an explicit user command without a model call, retaining context."""
         if not command.strip():
@@ -525,6 +539,8 @@ class Agent:
         skills_aug = self.skills.get_prompt_augmentation()
         if skills_aug:
             prompt += "\n" + skills_aug
+        # Build per request so resumed chats and project changes use live facts.
+        prompt += "\n\n" + environment_prompt(cwd=self.default_cwd)
         return prompt
 
     async def run(
@@ -669,6 +685,8 @@ class Agent:
             reasoning_accum: List[str] = []
             stream_tool_calls: List[ToolCall] = []
 
+            yield AgentEvent(type=AgentEventType.MODEL_REQUEST_STARTED, session_id=sid,
+                             metadata={"iteration": iteration})
             try:
                 async for chunk in provider.chat_stream(
                     messages=request_messages,
@@ -762,6 +780,7 @@ class Agent:
                     tool_name=fn_name,
                     server_name=server_name,
                     arguments=args_dict,
+                    metadata={"tool_call_id": tc.id},
                 )
 
                 t0 = time.time()
@@ -783,6 +802,7 @@ class Agent:
                         server_name=server_name,
                         content=result.content,
                         duration_ms=duration_ms,
+                        metadata={"tool_call_id": tc.id},
                     )
                 else:
                     yield AgentEvent(
@@ -792,6 +812,7 @@ class Agent:
                         server_name=server_name,
                         content=result.content,
                         duration_ms=duration_ms,
+                        metadata={"tool_call_id": tc.id},
                     )
 
                 msg_target.append(result.to_message())

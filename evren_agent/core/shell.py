@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import ntpath
 import os
 from pathlib import Path
 import shutil
@@ -14,10 +15,16 @@ from typing import Optional
 OUTPUT_LIMIT = 32_768  # bytes per stream retained for display and model context
 
 
+def default_shell() -> str:
+    """The interpreter actually used by local commands when shell is omitted."""
+    if sys.platform == "win32":
+        return os.environ.get("COMSPEC") or "cmd.exe"
+    return os.environ.get("SHELL") or "/bin/sh"
+
+
 def shell_args(command: str, shell: Optional[str] = None) -> list[str]:
-    selected = shell or (os.environ.get("COMSPEC", "cmd.exe") if sys.platform == "win32"
-                         else os.environ.get("SHELL") or "/bin/sh")
-    name = Path(selected).name.lower()
+    selected = shell or default_shell()
+    name = ntpath.basename(selected).lower()
     executable = shutil.which(selected)
     if executable is None:
         raise ValueError(f"Shell not found: {selected}")

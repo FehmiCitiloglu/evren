@@ -87,7 +87,8 @@ class StreamChunk(BaseModel):
     delta_reasoning: Optional[str] = None
     tool_calls: Optional[List[ToolCall]] = None
     is_done: bool = False
-    usage: Optional[Dict[str, int]] = None
+    # Providers include nested cache/reasoning token details in usage frames.
+    usage: Optional[Dict[str, Any]] = None
 
 
 class ModelInfo(BaseModel):

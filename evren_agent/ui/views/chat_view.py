@@ -22,8 +22,9 @@ from PIL import Image
 from evren_agent.core.events import AgentEvent, AgentEventType
 from evren_agent.core.session import ChatSession
 from evren_agent.ui.components.tool_card import ToolActivityGroup
+from evren_agent.ui.components.live_activity import LiveActivity, command_preview
 from evren_agent.ui.components.markdown_message import MarkdownMessage
-from evren_agent.ui.service import EvrenService
+from evren_agent.ui.service import EvrenService, turkce_hata_mesaji
 from evren_agent.ui.theme import THEME_COLORS
 
 
@@ -258,6 +259,7 @@ class ChatView(ctk.CTkFrame):
         self._current_bot_record: Optional[Dict[str, Any]] = None
         self._history_ids: Dict[str, str] = {}
         self.is_streaming = False
+        self.activity_stage = "Hazır"
 
         self._build_ui()
         self._load_models()
@@ -478,6 +480,9 @@ class ChatView(ctk.CTkFrame):
         bottom_box = ctk.CTkFrame(self, fg_color=("gray90", "#1e293b"), corner_radius=12)
         bottom_box.grid(row=6, column=0, sticky="ew", padx=16, pady=(4, 12))
         bottom_box.grid_columnconfigure(1, weight=1)
+        self.live_activity = LiveActivity(bottom_box)
+        self.live_activity.grid(row=0, column=0, columnspan=3, sticky="ew", padx=10, pady=(8, 0))
+        self.live_activity.grid_remove()
 
         # Görsel Ekle Butonu
         self.add_img_btn = ctk.CTkButton(
@@ -490,7 +495,7 @@ class ChatView(ctk.CTkFrame):
             text_color=("gray20", "gray85"),
             command=self._select_image,
         )
-        self.add_img_btn.grid(row=0, column=0, padx=(10, 6), pady=10)
+        self.add_img_btn.grid(row=1, column=0, padx=(10, 6), pady=10)
 
         # Çok Satırlı Metin Girdisi
         self.input_textbox = ctk.CTkTextbox(
@@ -501,7 +506,7 @@ class ChatView(ctk.CTkFrame):
             border_width=1,
             corner_radius=8,
         )
-        self.input_textbox.grid(row=0, column=1, sticky="ew", padx=6, pady=10)
+        self.input_textbox.grid(row=1, column=1, sticky="ew", padx=6, pady=10)
         self.input_textbox.bind("<Return>", self._handle_return_key)
         self.input_textbox.bind("<KP_Enter>", self._handle_return_key)
 
@@ -516,7 +521,7 @@ class ChatView(ctk.CTkFrame):
             hover_color="#2563eb",
             command=self._on_send_pressed,
         )
-        self.send_btn.grid(row=0, column=2, padx=(6, 10), pady=10)
+        self.send_btn.grid(row=1, column=2, padx=(6, 10), pady=10)
 
         # Kısayol İpucu
         hint_lbl = ctk.CTkLabel(
@@ -625,9 +630,17 @@ class ChatView(ctk.CTkFrame):
 
         self.service.fetch_models_async(on_success=on_models)
 
-    def _on_model_selected(self, model: str) -> None:
-        self.session.model = model
+    def _on_model_selected(self, model: str) -> bool:
+        try:
+            self.service.set_default_model(model)
+        except Exception as error:
+            self.model_combo.set(self.session.model)
+            messagebox.showerror("Model kaydedilemedi", turkce_hata_mesaji(error))
+            return False
+        self.session.model = model.strip()
+        self.model_combo.set(self.session.model)
         self._save_history()
+        return True
 
     def _refresh_history(self) -> None:
         if self._on_history_change:
@@ -730,6 +743,7 @@ class ChatView(ctk.CTkFrame):
             self.history_status.configure(text="Silinemedi", text_color=("#b91c1c", "#f87171"))
             return
         self.session = self.service.get_or_create_session(None)
+        self.model_combo.set(self.session.model)
         self.clear_chat()
         self._update_mcp_chips()
         self._refresh_history()
@@ -817,6 +831,9 @@ class ChatView(ctk.CTkFrame):
         if not model:
             messagebox.showwarning("Model Gerekli", "Lütfen bir model seçiniz.")
             return
+        # Editable combo entries do not invoke the selection callback.
+        if model != self.session.model and not self._on_model_selected(model):
+            return
 
         image_to_send = self.attached_image_path
 
@@ -858,6 +875,7 @@ class ChatView(ctk.CTkFrame):
 
         # Akışı Başlat
         self.is_streaming = True
+        self._show_activity_stage("Hazırlanıyor", "Model ve araç bağlantıları hazırlanıyor…")
         self.send_btn.configure(text="Durdur", fg_color="#ef4444", hover_color="#dc2626")
 
         # Oturum parametrelerini güncelle
@@ -898,8 +916,15 @@ class ChatView(ctk.CTkFrame):
             nonlocal text_before_tools
             if self._stream_token is not stream_token:
                 return
+            if evt.type == AgentEventType.MODEL_REQUEST_STARTED:
+                self._show_activity_stage("Model yanıtı bekleniyor", "Modelin sonraki adımı bekleniyor…")
+            elif evt.type == AgentEventType.MCP_CONNECTING:
+                self._show_activity_stage("MCP bağlanıyor", f"{evt.server_name} bağlantısı kuruluyor…")
+            elif evt.type == AgentEventType.MCP_CONNECTED:
+                self._show_activity_stage("Hazırlanıyor", f"{evt.server_name} bağlandı; model yanıtı bekleniyor…")
             if evt.type == AgentEventType.TEXT_DELTA:
                 if evt.content:
+                    self._show_activity_stage("Yanıt yazılıyor", "Modelden yanıt metni alınıyor…")
                     if text_before_tools and accumulated_chunks:
                         accumulated_chunks.append("\n\n")
                     text_before_tools = False
@@ -911,19 +936,23 @@ class ChatView(ctk.CTkFrame):
             elif evt.type == AgentEventType.REASONING_DELTA:
                 if evt.content:
                     get_activity().append_reasoning(evt.content)
+                    self._show_activity_stage("Model düşünüyor", "Model sonraki adımı değerlendiriyor…")
                     self._scroll_to_bottom()
 
             elif evt.type == AgentEventType.TOOL_CALL_STARTED:
                 get_activity().start_tool(evt)
+                self._show_active_tools()
                 text_before_tools = bool(accumulated_chunks)
                 self._scroll_to_bottom()
 
             elif evt.type in (AgentEventType.TOOL_CALL_RESULT, AgentEventType.TOOL_CALL_ERROR, AgentEventType.TOOL_CALL_ARGUMENTS):
                 get_activity().update_tool(evt)
+                self._show_active_tools()
                 self._scroll_to_bottom()
 
             elif evt.type == AgentEventType.MCP_ERROR:
                 get_activity().add_connection_error(evt)
+                self._show_activity_stage("Hazırlanıyor", "MCP bağlantısı kurulamadı; diğer adımlar bekleniyor…")
                 self._scroll_to_bottom()
 
             elif evt.type == AgentEventType.DONE:
@@ -950,17 +979,46 @@ class ChatView(ctk.CTkFrame):
     def destroy(self) -> None:
         self._save_history()
         self._stream_token = None
+        self.live_activity.stop()
         if self._scroll_job is not None:
             self.after_cancel(self._scroll_job)
             self._scroll_job = None
         super().destroy()
 
     def _finish_streaming(self) -> None:
+        following = self._capture_scroll_anchor() is not None
         self.is_streaming = False
+        self.activity_stage = "Hazır"
+        self.live_activity.stop()
+        self.live_activity.grid_remove()
         self._stream_token = None
         self.send_btn.configure(text="Gönder", fg_color="#3b82f6", hover_color="#2563eb")
         self.history_combo.configure(state="readonly")
-        self._scroll_to_bottom()
+        # Removing the live banner grows the viewport and changes its offset.
+        # Preserve bottom-following across that layout change, but leave a
+        # reader of older messages at their chosen position.
+        self._scroll_to_bottom(force=following)
+
+    def _show_activity_stage(self, stage: str, detail: str) -> None:
+        changed = self.activity_stage != stage
+        self.activity_stage = stage
+        self.live_activity.grid()
+        self.live_activity.show_stage(stage, detail)
+        if self._current_activity:
+            self._current_activity.phase = stage
+            self._current_activity._refresh_summary()
+        if changed:
+            self._refresh_history()
+
+    def _show_active_tools(self) -> None:
+        active = [tool for tool in self._current_activity.tools if tool.status == "running"]
+        if active:
+            tool = active[-1]
+            stage = "Komut çalışıyor" if len(active) == 1 else f"{len(active)} komut çalışıyor"
+            self._show_activity_stage(stage, f"{tool.server_name} · {tool.tool_name}\n"
+                                      + command_preview(tool.tool_name, tool.arguments))
+        else:
+            self._show_activity_stage("Model yanıtı bekleniyor", "Komutlar tamamlandı; modelin sonraki adımı bekleniyor…")
 
     def _reveal_reply(self, bubble: ChatMessageBubble) -> None:
         """Keep the clicked turn's answer visible when its tall drawer closes."""
@@ -1030,6 +1088,7 @@ class ChatView(ctk.CTkFrame):
         if not self._save_history():
             return
         self.session = self.service.get_or_create_session(None)
+        self.model_combo.set(self.session.model)
         self.clear_chat()
         self._update_mcp_chips()
         self._refresh_history()
