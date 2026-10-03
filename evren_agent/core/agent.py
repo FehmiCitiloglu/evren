@@ -181,6 +181,9 @@ class Agent:
     def _register_meta_tools(self) -> None:
         """Registers self-management tools available to the LLM agent."""
 
+        from evren_agent.projects.git_tools import register_git_tools
+        register_git_tools(self)
+
         # Tool 1: add_mcp_server
         self.tools.register(
             ToolDefinition(
@@ -539,6 +542,8 @@ class Agent:
         skills_aug = self.skills.get_prompt_augmentation()
         if skills_aug:
             prompt += "\n" + skills_aug
+        from evren_agent.projects.git_tools import GIT_AGENT_INSTRUCTIONS
+        prompt += GIT_AGENT_INSTRUCTIONS
         # Build per request so resumed chats and project changes use live facts.
         prompt += "\n\n" + environment_prompt(cwd=self.default_cwd)
         return prompt

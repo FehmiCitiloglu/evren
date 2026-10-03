@@ -75,7 +75,7 @@ def test_projects_view_full_lifecycle(monkeypatch):
 
             # 5. Switch between all workspace tabs
             sub_tabs = [
-                "overview", "coding", "tasks", "features", "backlog",
+                "overview", "coding", "git", "tasks", "features", "backlog",
                 "roadmap", "bugs_debt", "docs_adr", "memory", "search_ask", "ai_pm", "settings"
             ]
             for tab_name in sub_tabs:

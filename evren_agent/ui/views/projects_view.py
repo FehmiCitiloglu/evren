@@ -45,6 +45,7 @@ from evren_agent.projects.service import ProjectService
 from evren_agent.ui.service import EvrenService
 from evren_agent.ui.editor import EDITORS, open_in_editor
 from evren_agent.ui.theme import THEME_COLORS
+from evren_agent.ui.views.git_view import GitView
 
 
 class ProjectsView(ctk.CTkFrame):
@@ -651,6 +652,7 @@ class ProjectsView(ctk.CTkFrame):
         tabs = [
             ("overview", "📊 Genel Bakış"),
             ("coding", "🤖 Kodlama Ajanı"),
+            ("git", "🌿 Git God"),
             ("tasks", "📋 Görevler"),
             ("features", "✨ Özellikler"),
             ("backlog", "📥 Backlog"),
@@ -715,6 +717,8 @@ class ProjectsView(ctk.CTkFrame):
             self._render_tab_overview(self.workspace_body)
         elif tab == "coding":
             self._render_tab_coding(self.workspace_body)
+        elif tab == "git":
+            self._render_tab_git(self.workspace_body)
         elif tab == "tasks":
             self._render_tab_tasks(self.workspace_body)
         elif tab == "features":
@@ -910,10 +914,22 @@ class ProjectsView(ctk.CTkFrame):
 
         self.coding_tabs = ctk.CTkTabview(mid_pane, fg_color="transparent", height=220)
         self.coding_tabs.grid(row=1, column=0, sticky="nsew", padx=8, pady=4)
-        for name in ("Sohbet", "Değişiklikler", "İşlemler", "Dosyalar"):
+        for name in ("Sohbet", "Değişiklikler", "İşlemler", "Dosyalar", "Git"):
             tab = self.coding_tabs.add(name)
             tab.grid_columnconfigure(0, weight=1)
             tab.grid_rowconfigure(0, weight=1)
+
+        git_tab = self.coding_tabs.tab("Git")
+        self.coding_git_view = None
+        ctk.CTkButton(git_tab, text="Git God çalışma alanını aç ↗", command=lambda: self._switch_workspace_tab("git")).grid(
+            row=1, column=0, sticky="e", pady=(4, 0),
+        )
+        def select_coding_tab():
+            if self.coding_tabs.get() == "Git" and self.coding_git_view is None:
+                self.coding_git_view = GitView(git_tab, self.service, p.local_path,
+                                               on_ask_agent=self._git_ask_agent, on_open_file=self._open_git_file)
+                self.coding_git_view.grid(row=0, column=0, sticky="nsew")
+        self.coding_tabs.configure(command=select_coding_tab)
 
         # Chat / Plan Textbox
         self.coding_chat_box = ctk.CTkTextbox(self.coding_tabs.tab("Sohbet"), font=ctk.CTkFont(size=12), wrap="word")
@@ -1030,6 +1046,29 @@ class ProjectsView(ctk.CTkFrame):
                 combo.configure(values=list(dict.fromkeys([combo.get(), *models])))
 
         self.service.fetch_models_async(on_success=on_models)
+
+    def _render_tab_git(self, container: Any) -> None:
+        project = self.project_service.db.get_project(self.current_project_id)
+        self.git_view = GitView(container, self.service, project.local_path,
+                                on_ask_agent=self._git_ask_agent, on_open_file=self._open_git_file)
+        self.git_view.grid(row=0, column=0, sticky="nsew")
+
+    def _open_git_file(self, relative_path: str) -> None:
+        project = self.project_service.db.get_project(self.current_project_id)
+        editor = self.service.config.get("coding_editor", {})
+        try:
+            root = GitService._insights_root(project.local_path)
+            target = workspace_path(root, relative_path)
+            open_in_editor(editor.get("name", "VS Code"), target, editor.get("path", ""))
+        except (OSError, ValueError, RuntimeError) as error:
+            messagebox.showerror("Editör Açılamadı", str(error))
+
+    def _git_ask_agent(self, prompt: str) -> None:
+        self._switch_workspace_tab("coding")
+        self.coding_tabs.set("Sohbet")
+        self.coding_input.delete(0, "end")
+        self.coding_input.insert(0, prompt)
+        self.coding_input.focus_set()
 
     def _on_coding_model_selected(self, model: str) -> None:
         state = self._coding_state()

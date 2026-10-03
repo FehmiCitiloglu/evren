@@ -172,6 +172,10 @@ Projenin **Kodlama Ajanı** sekmesinde model seçimi proje bazında kaydedilir. 
 
 Karşılaştırma son çalışma süresindeki kaynak dosya değişikliklerini gösterir; aynı sırada dışarıdan yapılan düzenlemeler de bu karşılaştırmaya dahildir. Gizli dosyalar, bağımlılık/derleme klasörleri ve ikili dosyalar taramaya dahil edilmez. Tarama 2000 dosya, dosya başına 1 MB ve toplam 20 MB ile sınırlıdır; eksik karşılaştırmalar arayüzde belirtilir. İşlem görünümü son çalışmanın en son 100 araç çağrısını tutar.
 
+**Git God**, proje gezinmesinden veya Kodlama Ajanı içindeki **Git** sekmesinden açılır. Katkı sıralaması, aktivite haritası, dosya değişim yoğunluğu, commit grafiği, satır yazarı (blame), yeniden adlandırmaları takip eden dosya geçmişi ve dal karşılaştırmaları gerçek yerel Git verilerinden hazırlanır. Değişiklikleri inceleyip stage/unstage/commit işlemleri yapabilir; gelişmiş komutları açıklamaları ve tam komut önizlemesiyle çalıştırabilirsiniz. Reflog, stash, worktree ve etiketler kurtarma ekranındadır. Katkı raporları JSON/CSV olarak dışa aktarılabilir. [Git God kullanım kılavuzu](docs/GIT_GOD.md).
+
+Kodlama ajanının yerleşik `git_inspect`, `git_tools` ve `git_prepare` araçları aynı Git servislerini kullanır. Okuma araçları arka planda çalışır; değişiklik yapan araçlar ajan için işlem önizlemesi döndürür ve Git panelinden onaylanır. Git kurulu olmalıdır; ayrıca sunucu veya grafik kütüphanesi kurulumu gerekmez.
+
 ### Masaüstü MCP Yöneticisi (Desktop MCP Manager)
 
 EVREN Masaüstü uygulaması, sol menüdeki **🔌 MCP** sekmesi üzerinden tam teşekküllü bir MCP sunucu yönetim merkezi sunar:
